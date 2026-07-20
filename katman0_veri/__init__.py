@@ -1,12 +1,27 @@
 # -*- coding: utf-8 -*-
 """Katman 0: veri ve kısıt çekirdeği.
 
-veri/ altındaki 6 excel'i okur, doğrular, değiştirilemez tek bir
-kısıt nesnesinde toplar. Diğer katmanlar excel'e dokunmaz. Detay: issue #2.
+veri/ altındaki 6 excel'i okur, yükleme anında doğrular ve değiştirilemez
+tek bir `Kisitlar` nesnesinde toplar. Tahmin, planlama ve simülatör veriyi
+YALNIZ buradan alır; hiçbir katman kendi kodunda excel açmaz. Detay: issue #2.
 """
+from .kisitlar import ARAC_ADLARI, AracTipi, Kisitlar, KiralikHat
+from .yukleyici import (
+    VeriHatasi,
+    dogrula_lojistik,
+    dogrula_talep,
+    dogrula_tm_tutarlilik,
+    veriyi_yukle,
+)
 
-
-def veriyi_yukle():
-    # TODO(issue #2): 6 excel okuyucu + doğrulamalar + frozen kısıt nesnesi
-    print("katman0: yükleyici henüz yazılmadı (issue #2)")
-    return None
+__all__ = [
+    "veriyi_yukle",
+    "Kisitlar",
+    "AracTipi",
+    "KiralikHat",
+    "ARAC_ADLARI",
+    "VeriHatasi",
+    "dogrula_talep",
+    "dogrula_lojistik",
+    "dogrula_tm_tutarlilik",
+]
