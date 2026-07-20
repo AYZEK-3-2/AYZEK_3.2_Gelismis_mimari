@@ -21,9 +21,32 @@ Taşıyıcı kurallar: servis birinci sınıf nesnedir; simülatör optimizatör
 
 `veri/` altında yarışma veri setleri (66.024 talep · 289 hat · 18 TM), `veri/sablon/` altında jüri çıktı şablonları, `veri/dokuman/` altında şartname ve soru-cevap PDF'leri.
 
+## Kurulum (Windows)
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Doğrulama: `pytest` (iskelet testleri yeşil olmalı).
+
 ## Çalıştırma
 
-Hedef: `python main.py` tek komutla iki teslim dosyasını (`Tasima-plani.xlsx`, `Talep-tahmini.xlsx`) deterministik üretir. (Kod iskeleti issue'larla birlikte geliyor.)
+```powershell
+python main.py
+```
+
+Tek komut, iki teslim dosyası: `Tasima-plani.xlsx` ve `Talep-tahmini.xlsx` (deterministik, sabit seed). Akış iskeleti hazır; katmanlar issue'lar kapandıkça doluyor. Klasör düzeni:
+
+```
+katman0_veri/       veri ve kısıt çekirdeği
+katman1_tahmin/     talep tahmini (LightGBM, WAPE)
+katman2_planlama/   greedy + CP-SAT planlama
+katman3_simulator/  bağımsız simülatör ve kalite kapıları
+tests/              pytest
+cikti/              üretilen teslim dosyaları (git dışı)
+```
 
 ## İş takibi
 
