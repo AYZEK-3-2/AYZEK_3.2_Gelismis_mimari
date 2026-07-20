@@ -104,6 +104,18 @@ def dogrula_talep(df: pd.DataFrame) -> None:
         pd.api.types.is_integer_dtype(df["toplam_desi"]),
         "toplam_desi tamsayı değil.",
     )
+    # talep_id tekil ve D+5hane; çıktı dosyalarında ID eşleşmesi buna dayanıyor
+    _hata_yoksa(df["talep_id"].is_unique, "talep_id tekrar eden değer içeriyor.")
+    _hata_yoksa(
+        df["talep_id"].astype(str).str.match(r"^D\d{5}$").all(),
+        "talep_id formatı D00001 kalıbına uymuyor.",
+    )
+    # panel anahtarı tekil olmalı: aynı hat/gün/slot için tek talep satırı
+    _hata_yoksa(
+        not df.duplicated(["tarih", "cikis", "varis", "talep_tamamlanma_saati"]).any(),
+        "Aynı (tarih, çıkış, varış, slot) için birden fazla talep satırı var — "
+        "panel anahtarı tekil değil.",
+    )
     gecersiz_slot = set(df["talep_tamamlanma_saati"].astype(str)) - set(_SLOT_NORMAL)
     _hata_yoksa(not gecersiz_slot, f"Beklenmeyen talep saati: {gecersiz_slot}")
     tarih = pd.to_datetime(df["tarih"])

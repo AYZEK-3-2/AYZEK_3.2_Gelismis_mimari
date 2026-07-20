@@ -51,7 +51,10 @@ class Kisitlar:
     _mesafe_km: Mapping[tuple[str, str], int]         # (çıkış,varış) -> km
     _sla_gun: Mapping[tuple[str, str], int]           # (çıkış,varış) -> 1|2
     _seyir_saat: Mapping[tuple[str, str, str], float] # (çıkış,varış,araç) -> saat
-    talep: pd.DataFrame                               # 66.024 satır (normalize slot)
+    # 66.024 satır, normalize slot ('09:00'/'17:00'). NOT: frozen alan yeniden
+    # atamayı engeller ama DataFrame içeriği teknik olarak değiştirilebilir;
+    # tüketen katman feature üretiminden önce .copy() almalı (tahmin zaten alıyor).
+    talep: pd.DataFrame
 
     # --- erişim yardımcıları -------------------------------------------------
     def hat_var_mi(self, cikis: str, varis: str) -> bool:

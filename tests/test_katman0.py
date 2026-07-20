@@ -151,6 +151,27 @@ def test_bos_hucre_hata():
         dogrula_talep(df)
 
 
+def test_talep_id_tekil(veri):
+    assert veri.talep["talep_id"].is_unique
+    assert len(veri.talep) == 66024
+
+
+def test_panel_anahtari_tekil(veri):
+    # aynı (tarih, hat, slot) için tek satır — tahmin panelinin dayandığı varsayım
+    assert not veri.talep.duplicated(["tarih", "cikis", "varis", "slot"]).any()
+
+
+def test_tekrarli_talep_id_hata():
+    df = pd.DataFrame({
+        "tarih": [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02")],
+        "cikis": ["Erzincan", "Erzincan"], "varis": ["Mardin", "Mardin"],
+        "talep_id": ["D00001", "D00001"], "toplam_desi": [5, 6],
+        "talep_tamamlanma_saati": ["9:00", "17:00"],
+    })
+    with pytest.raises(VeriHatasi, match="talep_id tekrar"):
+        dogrula_talep(df)
+
+
 def test_self_loop_hata():
     df = pd.DataFrame({
         "cikis": ["Mardin"], "varis": ["Mardin"], "mesafe_km": [10],
