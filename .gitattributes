@@ -1,0 +1,8 @@
+# Metin dosyaları depoda LF olarak normalize edilir (determinizm + CRLF uyarısı yok).
+* text=auto eol=lf
+
+# Binary veri/döküman dosyaları — satır-sonu dönüşümüne ASLA girmemeli (yoksa bozulur).
+*.xlsx binary
+*.pdf  binary
+*.docx binary
+*.pyc  binary
