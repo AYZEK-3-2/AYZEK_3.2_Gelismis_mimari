@@ -197,6 +197,13 @@ def veriyi_yukle(veri_klasoru: Path | None = None) -> Kisitlar:
         talep_hatlar <= loj_hatlar,
         f"Lojistik matrisinde karşılığı olmayan talep hattı: {sorted(talep_hatlar - loj_hatlar)}",
     )
+    # her kiralık hat da matriste olmalı — planlayıcı (issue #13) kiralığın
+    # mesafe/seyir süresini buradan çekecek; eksikse derinde KeyError yerine net hata
+    kir_hatlar = set(map(tuple, kir[["Çıkış Transfer Merkezi", "Varış Transfer Merkezi"]].to_numpy()))
+    _hata_yoksa(
+        kir_hatlar <= loj_hatlar,
+        f"Lojistik matrisinde karşılığı olmayan kiralık hat: {sorted(kir_hatlar - loj_hatlar)}",
+    )
 
     # --- kısıt nesnelerini kur ---
     arac_tipleri = {

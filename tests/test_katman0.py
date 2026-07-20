@@ -97,6 +97,13 @@ def test_lookuplar(veri):
     assert veri.seyir_saat("İstanbul", "Yalova", "Tır") == pytest.approx(0.92)
 
 
+def test_kiralik_hatlar_matriste(veri):
+    # planlayıcı her kiralık hattın mesafe/seyir süresini bulabilmeli
+    for k in veri.kiralik_hatlar:
+        assert veri.hat_var_mi(k.cikis, k.varis), f"kiralık hat matriste yok: {k.cikis}->{k.varis}"
+        assert veri.seyir_saat(k.cikis, k.varis, k.arac_turu) > 0
+
+
 # --- değişmezlik -------------------------------------------------------------
 
 def test_frozen_alan_atanamaz(veri):
