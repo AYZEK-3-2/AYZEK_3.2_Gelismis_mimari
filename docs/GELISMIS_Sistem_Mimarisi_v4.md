@@ -423,8 +423,8 @@ Dolayısıyla **tahmin saf doğruluğu kovalar, optimizatör de tahmini veri kab
 **Talep ID:** `D00001…` sıralı, deterministik, `(tarih, slot, çıkış, varış)` sırasına göre. Katman 3'ün eşleşme kontrolünde.
 
 **Backtest protokolü.** MVP'den devralınır ve sıkılaştırılır:
-- **Walk-forward**, 5 kat, eğitim→test arası **7 gün boşluk** (sızıntı önlemi). Ufuk 7 gün olduğu için boşluk ufka eşit olmalı.
-- Her katın test penceresi 7 gün × 2 slot — gerçek teslim koşuluyla birebir aynı şekil.
+- **Walk-forward**, 5 kat, test penceresi eğitimin **hemen ardından** (bitişik). Gerçek görev "veri sonundan sonraki 7 günü tahmin et" (28 Haz → 29 Haz–5 Tem = origin'den 1–7 gün ileri); backtest de birebir bunu ölçmeli. **Sızıntı önlemi boşluk DEĞİL, lag seçimidir:** en küçük lag (7) = ufuk (7 gün), dolayısıyla 7 günlük tahmin bloğu origin'i geçip geleceğe bakamaz (5 Tem için bile lag_7 = 28 Haz = origin). *v4 notu: v3'ün "7 gün boşluk" kuralı backtest'i h=8–14'e kaydırıyordu — gerçek görevden (h=1–7) daha zor bir problem ölçüyordu; düzeltildi.*
+- Her katın test penceresi 7 gün × 2 slot = 4.046 satır — gerçek teslim çıktısıyla birebir aynı şekil.
 - **Son kat mutlaka Haziran sonu** olmalı: trend Ocak→Haziran %75 arttığı için eski katlarda iyi görünen model güncel rejimde kötü olabilir.
 - Metrik WAPE; MAPE yalnız referans olarak raporlanır (bu veride patlıyor).
 - **Naif taban çizgisi zorunlu:** "geçen haftanın aynı günü, aynı slotu". DOW etkisi 20× olduğu için bu taban şaşırtıcı derecede güçlüdür; model onu yenmiyorsa karmaşıklık boşuna.

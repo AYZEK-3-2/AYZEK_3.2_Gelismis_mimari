@@ -126,14 +126,29 @@ def test_bolme_5_kat(panel):
     assert katlar[0].test_bitis == panel["tarih"].max()  # kat 0 en güncel (Haziran sonu)
 
 
-def test_bolme_bosluk_ve_sira(panel):
+def test_bolme_bitisik_ve_sira(panel):
     for kat in walk_forward_bol(panel):
         egt = panel.iloc[kat.egitim_idx]["tarih"]
         tst = panel.iloc[kat.test_idx]["tarih"]
         assert egt.max() < tst.min()                       # eğitim testten önce
-        assert (kat.test_baslangic - egt.max()).days >= 7  # 7 günlük boşluk
+        assert (kat.test_baslangic - egt.max()).days == 1  # bitişik (boşluk yok)
         assert (kat.test_bitis - kat.test_baslangic).days == 6  # 7 günlük pencere
         assert set(kat.egitim_idx) & set(kat.test_idx) == set()  # kesişim yok
+
+
+def test_bolme_gercek_horizon(panel):
+    """Bitişik split gerçek görevi ölçüyor mu: test origin'den 1..7 gün ileri?"""
+    kat = walk_forward_bol(panel)[0]
+    h_bas = (kat.test_baslangic - kat.egitim_bitis).days
+    h_son = (kat.test_bitis - kat.egitim_bitis).days
+    assert (h_bas, h_son) == (1, 7)  # gerçek görev: origin'den 1..7 gün
+
+
+def test_bolme_ayrim_opsiyonel(panel):
+    """ayrim_gun ile boşluk konabilmeli (muhafazakâr mod)."""
+    kat = walk_forward_bol(panel, ayrim_gun=7)[0]
+    egt = panel.iloc[kat.egitim_idx]["tarih"]
+    assert (kat.test_baslangic - egt.max()).days == 8  # 7 boş gün + 1
 
 
 def test_bolme_determinist(panel):

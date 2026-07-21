@@ -1,11 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Walk-forward backtest bölmesi (sızıntı boşluklu).
+"""Walk-forward backtest bölmesi.
 
-Ufuk 7 gün olduğu için eğitim ile test arasına **7 günlük boşluk** konur
-(mimari §7): test penceresinin hemen öncesindeki günlerle eğitip o pencereyi
-tahmin etmek, gerçek teslim koşulunu (7 gün ileriyi görmeden) taklit etmez.
-Son kat mutlaka en güncel penceredir (Haziran sonu) — trend Ocak→Haziran
-%75 arttığı için eski katlarda iyi görünen model güncelde kötü olabilir.
+Gerçek görev: veri sonundan sonraki 7 günü tahmin etmek (28 Haz → 29 Haz–5 Tem,
+origin'den 1–7 gün ileri). Backtest de birebir bunu ölçer: test penceresi
+eğitimin **hemen ardından** gelir (bitişik). Sızıntıyı boşluk değil, **lag
+seçimi** önler — en küçük lag (7) ufka (7 gün) eşit olduğu için 7 günlük tahmin
+bloğu origin'i geçip geleceğe bakamaz (mimari §7).
+
+`ayrim_gun` ile araya boşluk konabilir (daha muhafazakâr, farklı horizon ölçer);
+default 0 = bitişik. Son kat en güncel penceredir (Haziran sonu) — trend
+Ocak→Haziran %75 arttığı için eski katlarda iyi görünen model güncelde kötü olabilir.
 """
 from __future__ import annotations
 
@@ -30,14 +34,15 @@ def walk_forward_bol(
     panel: pd.DataFrame,
     kat_sayisi: int = 5,
     test_gun: int = 7,
-    bosluk_gun: int = 7,
+    ayrim_gun: int = 0,
 ) -> list[Kat]:
     """En güncelden geriye doğru `kat_sayisi` kat üretir.
 
     Kat 0 en güncel test penceresi (veri sonu). Her kat için:
-      test  = [test_baslangic, test_bitis]  (test_gun uzunluğunda)
-      boşluk = test_baslangic'tan önceki `bosluk_gun` gün (eğitime girmez)
-      eğitim = boşluğun da öncesindeki tüm günler (genişleyen pencere)
+      test   = [test_baslangic, test_bitis]  (test_gun uzunluğunda)
+      eğitim = test'ten önceki tüm günler (genişleyen pencere)
+      ayrim  = eğitim sonu ile test başı arasına konan `ayrim_gun` boş gün
+               (default 0 = bitişik, gerçek görevle aynı horizon)
     """
     tarih = panel["tarih"]
     son = tarih.max()
@@ -46,7 +51,7 @@ def walk_forward_bol(
     for k in range(kat_sayisi):
         test_bitis = son - pd.Timedelta(days=k * test_gun)
         test_baslangic = test_bitis - pd.Timedelta(days=test_gun - 1)
-        egitim_bitis = test_baslangic - pd.Timedelta(days=bosluk_gun)  # boşluk
+        egitim_bitis = test_baslangic - pd.Timedelta(days=1 + ayrim_gun)
 
         egitim_mask = tarih <= egitim_bitis
         test_mask = (tarih >= test_baslangic) & (tarih <= test_bitis)

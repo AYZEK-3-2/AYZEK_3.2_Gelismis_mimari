@@ -10,6 +10,12 @@ olarak yüksek tahmin eder.
 Feature'lar sızıntısızdır: hedefe bağlı her feature (lag, rolling) yalnız
 GEÇMİŞE bakar (`.shift`). Takvim feature'ları (haftanın günü, gün indeksi,
 slot) gelecekte de bilindiği için sızıntı sayılmaz.
+
+Sızıntı güvenliğinin ASIL kaynağı lag seçimidir: en küçük lag (7) tahmin
+ufkuna (7 gün) eşittir. 28 Haziran'dan 29 Haz–5 Tem tahmin edilirken, bloğun
+son günü (5 Tem) için bile lag_7 = 28 Haziran = origin (biliniyor). Yani hiçbir
+lag, 7 günlük tahmin penceresi içindeki bir güne (henüz bilinmeyen) bakmaz.
+1–6 arası lag kullanılsaydı blok kendi geleceğine bakardı — bu yüzden 7/14/28.
 """
 from __future__ import annotations
 
