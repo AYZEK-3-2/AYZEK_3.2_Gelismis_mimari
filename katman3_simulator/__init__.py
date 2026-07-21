@@ -13,6 +13,10 @@ from .format_kapisi import dogrula_plan_formati, dogrula_muhasebe, dogrula_talep
 def dogrula_ve_yaz(veri, tahmin, plan):
     """Simülasyonu çalıştır, format kapısını geç, sonucu döndür."""
 
+    if plan is None:
+        print("katman3: plan henüz üretilmedi, simülatör atlanıyor")
+        return None
+
     # 1) Plan dosyasını doğrula ve simülasyonu çalıştır
     sonuc = simulasyonu_calistir(plan, veri)
 
