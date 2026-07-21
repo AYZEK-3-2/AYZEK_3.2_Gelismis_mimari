@@ -122,3 +122,4 @@ def simulasyonu_calistir(plan_dosyasi: str, kisitlar) -> dict:
     print("Doğrulama: GEÇTI")
 
     return ozet
+
