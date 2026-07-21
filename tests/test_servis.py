@@ -127,5 +127,14 @@ def test_ziyaret_ani():
     # İstanbul = çıkış noktası, 09:00 olmalı
     assert servis.ziyaret_ani("İstanbul", FakeKisitlar()) == datetime(2026, 6, 29, 9, 0)
 
-    # Eskişehir = 300 dk sonra = 14:00
+    # Eskişehir = 300 dk sonra = 14:00 (öncesinde ara durak yok)
     assert servis.ziyaret_ani("Eskişehir", FakeKisitlar()) == datetime(2026, 6, 29, 14, 0)
+
+    # Ankara = İst→Esk (300) + Eskişehir elleçleme (6000×0.01=60) + Esk→Ank (300)
+    # = 660 dk sonra = 20:00. Ara durak elleçlemesi ATLANMAMALI.
+    assert servis.ziyaret_ani(
+        "Ankara", FakeKisitlar(), {"Eskişehir": 6000}
+    ) == datetime(2026, 6, 29, 20, 0)
+
+    # yük verilmezse ara durak elleçlemesi 0 → yalnız seyir (19:00)
+    assert servis.ziyaret_ani("Ankara", FakeKisitlar()) == datetime(2026, 6, 29, 19, 0)

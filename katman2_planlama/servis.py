@@ -44,10 +44,25 @@ class Servis:
                 f"'{cikis}' '{varis}'den önce gelmiyor: {self.duraklar}"
             )
 
-    def ziyaret_ani(self, tm: str, kisitlar: "Kisitlar") -> datetime:
+    def ziyaret_ani(
+        self,
+        tm: str,
+        kisitlar: "Kisitlar",
+        yuk_per_durak: dict[str, float] | None = None,
+    ) -> datetime:
+        """Aracın `tm` durağına fiziksel varış anı (o durağın elleçlemesinden önce).
+
+        Ara duraklarda geçen elleçleme süresini de hesaba katar (indir+yükle),
+        yoksa çok duraklı rotada sonraki durakların varışı olduğundan erken çıkar.
+        `yuk_per_durak` verilmezse ara durak elleçlemesi 0 sayılır (yalnız seyir).
+        SLA için hedef durağın kendi varış elleçlemesi ayrıca eklenmelidir.
+        """
         from datetime import timedelta
+
         if tm not in self.duraklar:
             raise ServisHatasi(f"'{tm}' bu serviste yok: {self.duraklar}")
+
+        yuk = yuk_per_durak or {}
         ani = self.cikis_ani
         for cikis_tm, varis_tm in self.bacaklar():
             if cikis_tm == tm:
@@ -55,7 +70,9 @@ class Servis:
             ani += timedelta(minutes=_seyir_dk(
                 kisitlar.seyir_saat(cikis_tm, varis_tm, self.arac_tipi)
             ))
-        return ani        
+            if varis_tm != tm:  # ara duraktan geçiyoruz → elleçleme süresi de geçer
+                ani += timedelta(minutes=_ellecleme_dk(yuk.get(varis_tm, 0.0)))
+        return ani
 
 
 def _seyir_dk(seyir_saat: float) -> int:
