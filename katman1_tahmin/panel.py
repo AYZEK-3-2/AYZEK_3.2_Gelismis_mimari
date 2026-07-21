@@ -11,11 +11,13 @@ Feature'lar sızıntısızdır: hedefe bağlı her feature (lag, rolling) yalnı
 GEÇMİŞE bakar (`.shift`). Takvim feature'ları (haftanın günü, gün indeksi,
 slot) gelecekte de bilindiği için sızıntı sayılmaz.
 
-Sızıntı güvenliğinin ASIL kaynağı lag seçimidir: en küçük lag (7) tahmin
-ufkuna (7 gün) eşittir. 28 Haziran'dan 29 Haz–5 Tem tahmin edilirken, bloğun
-son günü (5 Tem) için bile lag_7 = 28 Haziran = origin (biliniyor). Yani hiçbir
-lag, 7 günlük tahmin penceresi içindeki bir güne (henüz bilinmeyen) bakmaz.
-1–6 arası lag kullanılsaydı blok kendi geleceğine bakardı — bu yüzden 7/14/28.
+Sızıntı güvenliğinin ASIL kaynağı geriye bakış mesafesidir: hedefe bağlı her
+feature en az UFUK_GUN (7) gün geriden başlar. 28 Haziran'dan 29 Haz–5 Tem
+tahmin edilirken, bloğun son günü (5 Tem) için bile lag_7 = 28 Haziran = origin
+(biliniyor). Yani hiçbir feature, 7 günlük tahmin penceresi içindeki bir güne
+(henüz bilinmeyen) bakmaz. Bunun için lag'lar 7/14/28 ve rolling `shift(UFUK_GUN)`
+ile başlar — `shift(1)` kullanılsaydı rolling, direct multi-step'te sonraki
+tahmin günlerinin desisine bakıp sızdırırdı.
 
 BİLİNEN SINIR (issue #9/#10 için) — `gun_index` ekstrapolasyonu: LightGBM ağaç
 tabanlı olduğu için bir feature'ın eğitimde görülen aralığının ÖTESİNE
@@ -31,6 +33,10 @@ import pandas as pd
 from katman0_veri import Kisitlar
 
 SLOTLAR: tuple[str, ...] = ("09:00", "17:00")
+
+# Tahmin ufku (gün). Hedefe bağlı feature'lar en az bu kadar geriden başlar ki
+# 7 günlük tahmin bloğunu origin'den aynı anda tahmin ederken sızıntı olmasın.
+UFUK_GUN: int = 7
 
 # Modelin (issue #9) kullanacağı feature kolonları — tek kaynak.
 FEATURE_KOLONLARI: tuple[str, ...] = (
@@ -85,9 +91,12 @@ def feature_ekle(panel: pd.DataFrame) -> pd.DataFrame:
     for lag in (7, 14, 28):
         p[f"lag_{lag}"] = grp.shift(lag)
     for w in (7, 28):
-        # shift(1): bugünkü hedef pencereye GİRMEZ → sızıntı yok
+        # shift(UFUK): rolling penceresi hedeften >= 7 gün geride biter. 7 günlük
+        # tahmin bloğunu ORIGIN'den aynı anda (direct multi-step) tahmin ederken,
+        # sonraki tahmin günlerinin (henüz bilinmeyen) desisine bakmayı önler.
+        # shift(1) kullanılsaydı origin+7 için pencere origin sonrasına taşardı.
         p[f"rolling_ort_{w}"] = grp.transform(
-            lambda s, _w=w: s.shift(1).rolling(_w, min_periods=1).mean()
+            lambda s, _w=w: s.shift(UFUK_GUN).rolling(_w, min_periods=1).mean()
         )
 
     return p

@@ -108,6 +108,33 @@ def test_feature_sizinti_yok(panel):
         )
 
 
+def test_feature_direct_multistep_sizinti_yok(panel):
+    """Direct multi-step: 7 günlük tahmin bloğunun feature'ları origin sonrasına bakmamalı.
+
+    Origin'i sabitle, SONRAKİ 7 günü (tahmin penceresi) boz. O penceredeki
+    satırların feature'ları DEĞİŞMEMELİ — yoksa gerçek tahminde hesaplanamayan
+    (henüz bilinmeyen) günlere bakıyor demektir. shift(1) rolling bu testte patlar.
+    """
+    from katman1_tahmin.panel import UFUK_GUN
+
+    origin = pd.Timestamp("2026-06-21")
+    pencere_son = origin + pd.Timedelta(days=UFUK_GUN)  # 28 Haziran
+    bozuk = panel.copy()
+    maske = (bozuk["tarih"] > origin) & (bozuk["tarih"] <= pencere_son)
+    bozuk.loc[maske, "desi"] *= 1000  # tahmin penceresini boz
+
+    f_orij = feature_ekle(panel)
+    f_bozuk = feature_ekle(bozuk)
+    pencere = (f_orij["tarih"] > origin) & (f_orij["tarih"] <= pencere_son)
+
+    for kol in ("lag_7", "lag_14", "lag_28", "rolling_ort_7", "rolling_ort_28"):
+        pd.testing.assert_series_equal(
+            f_orij.loc[pencere, kol].reset_index(drop=True),
+            f_bozuk.loc[pencere, kol].reset_index(drop=True),
+            check_names=False,
+        )
+
+
 def test_lag_gecmisi_gosteriyor(panel):
     """lag_7 gerçekten 7 gün önceki aynı slot desisi mi?"""
     f = feature_ekle(panel)
