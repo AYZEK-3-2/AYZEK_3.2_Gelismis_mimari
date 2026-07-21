@@ -44,6 +44,20 @@ class Servis:
                 f"'{cikis}' '{varis}'den önce gelmiyor: {self.duraklar}"
             )
 
+    def ziyaret_ani(self, tm: str, kisitlar: "Kisitlar") -> datetime:
+        from datetime import timedelta
+        if tm not in self.duraklar:
+            raise ServisHatasi(f"'{tm}' bu serviste yok: {self.duraklar}")
+        ani = self.cikis_ani
+        for cikis_tm, varis_tm in self.bacaklar():
+            if cikis_tm == tm:
+                return ani
+            ani += timedelta(minutes=_seyir_dk(
+                kisitlar.seyir_saat(cikis_tm, varis_tm, self.arac_tipi)
+            ))
+        return ani        
+
+
 def _seyir_dk(seyir_saat: float) -> int:
     return math.ceil(seyir_saat * 60)
 
@@ -70,11 +84,11 @@ def maliyet_hesapla(
     arac = kisitlar.arac_tipleri[servis.arac_tipi]
     bacaklar = servis.bacaklar()
 
-    sur_dk = _ellecleme_dk(yuk_per_durak.get(servis.duraklar[0], 0.0))    
+    sur_dk = _ellecleme_dk(yuk_per_durak.get(servis.duraklar[0], 0.0)) 
+    sur_dk += bekleme_dk
 
     toplam_km = 0
     for i, (cikis_tm, varis_tm) in enumerate(bacaklar):
-        sur_dk += bekleme_dk
         sur_dk += _seyir_dk(kisitlar.seyir_saat(cikis_tm, varis_tm, servis.arac_tipi))
         toplam_km += kisitlar.mesafe_km(cikis_tm, varis_tm)
         if i < len(bacaklar) - 1:
@@ -84,7 +98,7 @@ def maliyet_hesapla(
 
     saatlik = arac.kiralik_saatlik_tl if servis.kiralik else arac.spot_saatlik_tl
     km_ucret = arac.kiralik_km_tl if servis.kiralik else arac.spot_km_tl
-    arac_maliyeti = round(saatlik * sur_dk / 60.0 + km_ucret * toplam_km, 2)
+    arac_maliyeti = saatlik * sur_dk / 60.0 + km_ucret * toplam_km
 
     return MaliyetSonuc(
         kullanim_suresi_dk=sur_dk,

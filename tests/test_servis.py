@@ -110,3 +110,22 @@ def test_talep_bagla_rotada_yok():
     )
     with pytest.raises(ServisHatasi):
         servis.talep_bagla("Bursa", "Ankara")  # Bursa rotada yok, hata vermeli
+
+def test_ziyaret_ani():
+    class FakeKisitlar:
+        arac_tipleri = {}
+        def seyir_saat(self, cikis, varis, arac):
+            return 5.0  # 5 saat = 300 dk
+
+    servis = Servis(
+        arac_tipi="Kamyon",
+        kiralik=False,
+        duraklar=("İstanbul", "Eskişehir", "Ankara"),
+        cikis_ani=datetime(2026, 6, 29, 9, 0),
+    )
+
+    # İstanbul = çıkış noktası, 09:00 olmalı
+    assert servis.ziyaret_ani("İstanbul", FakeKisitlar()) == datetime(2026, 6, 29, 9, 0)
+
+    # Eskişehir = 300 dk sonra = 14:00
+    assert servis.ziyaret_ani("Eskişehir", FakeKisitlar()) == datetime(2026, 6, 29, 14, 0)
