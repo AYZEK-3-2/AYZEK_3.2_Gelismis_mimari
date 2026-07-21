@@ -5,6 +5,8 @@ from katman3_simulator.hesaplamalar import (
     kullanim_suresi_dk,
     gece_yarisi_bolme,
     sla_ceza_saat,
+    arac_maliyeti_tl,
+    sla_ceza_tl,
 )
 
 # Altın vektör 1: 10.000 desi + 5 saat yol = 500 dk
@@ -58,3 +60,26 @@ def test_sla_ceza_tam_saat():
 
 def test_sla_ceza_sifir():
     assert sla_ceza_saat(0) == 0
+
+    # Maliyet: spot tır, 10.000 desi, 194 km, 2.98 saat seyir
+def test_arac_maliyeti_spot_tir():
+    kullanim = kullanim_suresi_dk(desi=10_000, seyir_saat=2.98)
+    maliyet = arac_maliyeti_tl(
+        saatlik_kira=487.5,
+        km_maliyet=25,
+        kullanim_dk=kullanim,
+        mesafe_km=194,
+    )
+    assert maliyet > 0
+
+
+# SLA cezası: 5000 desi, 61 dk gecikme = 2 saat ceza = 5000 × 2 × 0.4 = 4000 TL
+def test_sla_ceza_hesabi():
+    ceza = sla_ceza_tl(geciken_desi=5000, gecikme_dk=61)
+    assert ceza == 4000.0
+
+
+# SLA cezası: gecikme yok = 0 TL
+def test_sla_ceza_gecikme_yok():
+    ceza = sla_ceza_tl(geciken_desi=5000, gecikme_dk=0)
+    assert ceza == 0.0

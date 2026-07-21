@@ -49,3 +49,22 @@ def sla_ceza_saat(gecikme_dk: int) -> int:
     if gecikme_dk <= 0:
         return 0
     return math.ceil(gecikme_dk / 60)
+
+
+def arac_maliyeti_tl(
+    saatlik_kira: float,
+    km_maliyet: float,
+    kullanim_dk: int,
+    mesafe_km: int,
+) -> float:
+    """Araç maliyeti: saatlik kira × kullanım süresi + km × km maliyeti."""
+    saat = kullanim_dk / 60
+    return saatlik_kira * saat + km_maliyet * mesafe_km
+
+
+def sla_ceza_tl(geciken_desi: float, gecikme_dk: int) -> float:
+    """SLA cezası: geciken desi × tavan(gecikme saati) × 0.4 TL."""
+    if gecikme_dk <= 0:
+        return 0.0
+    ceza_saat = math.ceil(gecikme_dk / 60)
+    return geciken_desi * ceza_saat * 0.4
