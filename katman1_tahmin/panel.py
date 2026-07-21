@@ -16,6 +16,13 @@ ufkuna (7 gün) eşittir. 28 Haziran'dan 29 Haz–5 Tem tahmin edilirken, bloğu
 son günü (5 Tem) için bile lag_7 = 28 Haziran = origin (biliniyor). Yani hiçbir
 lag, 7 günlük tahmin penceresi içindeki bir güne (henüz bilinmeyen) bakmaz.
 1–6 arası lag kullanılsaydı blok kendi geleceğine bakardı — bu yüzden 7/14/28.
+
+BİLİNEN SINIR (issue #9/#10 için) — `gun_index` ekstrapolasyonu: LightGBM ağaç
+tabanlı olduğu için bir feature'ın eğitimde görülen aralığının ÖTESİNE
+genelleyemez. Tahmin haftasında gun_index 179–185 olur (eğitim max'ı 178);
+model bu satırları en sağdaki yaprağa atar ve trendi SÜRDÜRMEZ, son seviyeyi
+tahmin eder. Trend'i asıl taşıyan lag/rolling'dir; gun_index yalnız yardımcı.
+Sürekli büyümeyi yakalamak #9/#10'un işi (detrend / log1p hedef — §7).
 """
 from __future__ import annotations
 

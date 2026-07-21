@@ -31,6 +31,15 @@ def test_panel_satir_sayisi(panel):
     assert len(panel) == 289 * 179 * 2 == 103462
 
 
+def test_panel_tam_eksik_gun_yok(panel):
+    # "eksik gün yok": her boyut tam ve her hat her günün iki slotunda mevcut
+    assert panel.groupby(["cikis", "varis"]).ngroups == 289
+    assert panel["tarih"].nunique() == 179
+    assert set(panel["slot"].unique()) == {"09:00", "17:00"}
+    # her (hat, slot) tam 179 gün içeriyor
+    assert (panel.groupby(["cikis", "varis", "slot"]).size() == 179).all()
+
+
 def test_panel_sutunlar_ve_tip(panel):
     assert list(panel.columns) == ["cikis", "varis", "tarih", "slot", "desi"]
     assert panel["desi"].dtype == "int64"
