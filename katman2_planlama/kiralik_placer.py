@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Kiralık araç yerleştirici.
 
-12 kiralık araç her gün zorunlu olarak çıkar — 7 gün x 12 araç = 84 servis.
+14 kiralık araç her gün zorunlu olarak çıkar — 7 gün x 14 araç = 98 servis.
 Rota sabit, uğrama yasak, dönüş yok.
 """
 from __future__ import annotations
@@ -43,11 +43,11 @@ def kiralik_servisleri_yerlestir(
     tahmin_baslangic: datetime,
 ) -> tuple[list[Servis], pd.DataFrame, KapasiteDefteri, float]:
     """
-    84 zorunlu kiralık servisi yerleştirir.
+    Zorunlu kiralık servisleri yerleştirir (7 gün × toplam araç adedi).
 
     Döndürür
     --------
-    servisler           : 84 Servis nesnesi
+    servisler           : Servis nesneleri
     kalan_talep_df      : spot havuzuna geçen artık talep
     kapasite            : güncellenmiş kapasite defteri
     toplam_maliyet_tl   : sabit kiralık maliyet (TL)
@@ -57,10 +57,14 @@ def kiralik_servisleri_yerlestir(
     kalan_satirlar: list[dict] = []
     toplam_maliyet_tl = 0.0
 
+    # Günlük kapasite rezervasyonu — tır slotu ve elleçleme bir kez düşülür
     for hat in kisitlar.kiralik_hatlar:
         if hat.arac_turu == "Tır":
             kapasite.tir_slot_dus(hat.cikis, hat.adet)
             kapasite.tir_slot_dus(hat.varis, hat.adet)
+        gunluk_ellecleme = kisitlar.arac_tipleri[hat.arac_turu].kapasite_desi * hat.adet
+        kapasite.ellecleme_dus(hat.cikis, gunluk_ellecleme)
+        kapasite.ellecleme_dus(hat.varis, gunluk_ellecleme)
 
     for gun in range(7):
         tarih = (tahmin_baslangic + timedelta(days=gun)).date()
@@ -76,11 +80,16 @@ def kiralik_servisleri_yerlestir(
             )
             desi_09 = float(tahmin_df.loc[maske_base & (tahmin_df["slot"] == "09:00"), "toplam_desi"].sum())
             desi_17 = float(tahmin_df.loc[maske_base & (tahmin_df["slot"] == "17:00"), "toplam_desi"].sum())
-            baz_saat = 9 if (desi_09 > 0 or (desi_09 == 0 and desi_17 == 0)) else 17
+            baz_saat = 9 if (desi_09 > 0 or desi_17 == 0) else 17
 
-            # 09:00 talebi önce yükle, kalan kapasite varsa 17:00 talebi al
-            yuk_09 = min(desi_09, toplam_kapasite)
-            yuk_17 = min(desi_17, toplam_kapasite - yuk_09)
+            # Araç yalnızca kendi çıkış slotunun talebini taşır;
+            # diğer slotun kargosu o saatte hazır değildir → tamamı spot'a
+            if baz_saat == 9:
+                yuk_09 = min(desi_09, toplam_kapasite)
+                yuk_17 = 0.0
+            else:
+                yuk_09 = 0.0
+                yuk_17 = min(desi_17, toplam_kapasite)
             yuk_desi = yuk_09 + yuk_17
             kalan_09 = desi_09 - yuk_09
             kalan_17 = desi_17 - yuk_17
@@ -100,9 +109,6 @@ def kiralik_servisleri_yerlestir(
                 servisler.append(servis)
                 yuk_per_durak = {hat.cikis: yuk_per_arac, hat.varis: yuk_per_arac}
                 toplam_maliyet_tl += maliyet_hesapla(servis, yuk_per_durak, kisitlar).arac_maliyeti_tl
-
-                kapasite.ellecleme_dus(hat.cikis, yuk_per_arac)
-                kapasite.ellecleme_dus(hat.varis, yuk_per_arac)
 
             for slot, kalan in (("09:00", kalan_09), ("17:00", kalan_17)):
                 if kalan > 0.0:

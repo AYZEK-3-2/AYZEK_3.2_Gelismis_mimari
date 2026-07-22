@@ -45,7 +45,8 @@ def bos_df():
         "slot": pd.Series([], dtype=str),
     })
 
-def test_84_servis(kisitlar, bos_df):
+def test_servis_sayisi_mock(kisitlar, bos_df):
+    # mock: 1 hat, adet=12 → 7 × 12 = 84
     servisler, _, _, _ = kiralik_servisleri_yerlestir(kisitlar, bos_df, BASLANGIC)
     assert len(servisler) == 84
 
@@ -84,6 +85,36 @@ def test_ugrama_exception(kisitlar, bos_df):
     servis = servisler[0]  # Mersin -> Kocaeli
     with pytest.raises(ServisHatasi):
         servis.talep_bagla("Eskişehir", "Kocaeli")
+
+def test_09_cikisinda_17_talep_spota_gider(kisitlar):
+    # 09:00 + 17:00 talebi birlikte var; araç 09:00'da çıkar → 17:00 kargo spot'a
+    df = pd.DataFrame([
+        {"tarih": pd.Timestamp(BASLANGIC.date()), "cikis": "Mersin", "varis": "Kocaeli",
+         "toplam_desi": 1000, "slot": "09:00"},
+        {"tarih": pd.Timestamp(BASLANGIC.date()), "cikis": "Mersin", "varis": "Kocaeli",
+         "toplam_desi": 2000, "slot": "17:00"},
+    ])
+    _, kalan_df, _, _ = kiralik_servisleri_yerlestir(kisitlar, df, BASLANGIC)
+    kalan_17 = kalan_df[kalan_df["slot"] == "17:00"]["kalan_desi"].sum()
+    kalan_09 = kalan_df[kalan_df["slot"] == "09:00"]["kalan_desi"].sum()
+    assert kalan_17 == 2000.0   # 17:00 kargo tamamı spot'a
+    assert kalan_09 == 0.0      # 09:00 kargo taşındı (kapasite yeterli)
+
+
+def test_gercek_servis_sayisi():
+    from katman0_veri.yukleyici import veriyi_yukle
+    import config
+    kisitlar = veriyi_yukle()
+    bos = pd.DataFrame({
+        "tarih": pd.Series([], dtype="datetime64[ns]"),
+        "cikis": pd.Series([], dtype=str),
+        "varis": pd.Series([], dtype=str),
+        "toplam_desi": pd.Series([], dtype=float),
+        "slot": pd.Series([], dtype=str),
+    })
+    servisler, _, _, _ = kiralik_servisleri_yerlestir(kisitlar, bos, config.TAHMIN_BASLANGIC)
+    assert len(servisler) == 98  # 7 gün × 14 araç
+
 
 def test_gercek_slot_tablosu():
     from katman0_veri.yukleyici import veriyi_yukle
