@@ -1,9 +1,9 @@
 import pandas as pd
 import pytest
 from katman3_simulator.simulator import (
-    plan_oku,
     dogrula_arac_tutarliligi,
     dogrula_rota_gecerliligi,
+    dogrula_zaman_cakismasi,
     SimulasyonHatasi,
 )
 
@@ -37,7 +37,7 @@ def sahte_plan(**degisiklikler):
 def test_ayni_arac_tek_tur():
     """Aynı araç tek tür olmalı — sorunsuz geçmeli."""
     df = sahte_plan()
-    dogrula_arac_tutarliligi(df)  # hata fırlatmamalı
+    dogrula_arac_tutarliligi(df)
 
 
 def test_arac_tur_degistirirse_hata():
@@ -47,60 +47,115 @@ def test_arac_tur_degistirirse_hata():
         dogrula_arac_tutarliligi(df)
 
 
-# --- Rota geçerliliği (MVP'nin hayalet rota hatası) ---
+# --- Rota geçerliliği ---
 
 def test_gecerli_rota():
     """Çıkış varıştan önce — sorunsuz geçmeli."""
     df = sahte_plan()
-    dogrula_rota_gecerliligi(df)  # hata fırlatmamalı
+    dogrula_rota_gecerliligi(df)
 
 
-def test_hayalet_rota_hata():
-    """MVP hatası: araç O2'ye uğramadan D2'ye teslim edemez."""
+def test_hayalet_rota_reddedilir():
+    """MVP hatası: araç [O, O2, D] rotasına O2->D2 talebi bağlanamaz.
+
+    Araç İstanbul -> Yalova -> Eskişehir gidiyor.
+    D00002 talebi Eskişehir -> Yalova diyor ama araç tersten gidiyor.
+    Bu reddedilmeli.
+    """
     df = pd.DataFrame({
         "Araç ID": ["V0001", "V0001", "V0001"],
         "Araç Tipi": ["Spot", "Spot", "Spot"],
         "Araç türü": ["Tır", "Tır", "Tır"],
-        "Çıkış": ["İstanbul", "İstanbul", "Yalova"],
-        "Varış": ["Yalova", "Eskişehir", "Eskişehir"],
-        "Çıkış Tarihi": ["29.06.2026"] * 3,
-        "Çıkış Saati": ["09:00"] * 3,
-        "Varış Tarihi": ["29.06.2026"] * 3,
-        "Varış Saati": ["10:00"] * 3,
+        "Çıkış": ["İstanbul", "Eskişehir", "Yalova"],
+        "Varış": ["Yalova", "Yalova", "Eskişehir"],
+        "Çıkış Tarihi": ["29.06.2026", "29.06.2026", "29.06.2026"],
+        "Çıkış Saati": ["09:00", "09:00", "11:00"],
+        "Varış Tarihi": ["29.06.2026", "29.06.2026", "29.06.2026"],
+        "Varış Saati": ["10:00", "10:00", "12:00"],
         "Talep ID": ["D00001", "D00002", "D00003"],
         "Taşınan Desi": [5000, 3000, 2000],
-        "Yolculuk süresi": [56] * 3,
-        "Çıkış elleçleme süresi": [80] * 3,
-        "Varış elleçleme süresi": [80] * 3,
+        "Yolculuk süresi": [56, 56, 56],
+        "Çıkış elleçleme süresi": [80, 80, 80],
+        "Varış elleçleme süresi": [80, 80, 80],
         "Toplam maliyet": [5000.0, 0.0, 0.0],
         "SLA cezası": [0.0, 0.0, 0.0],
     })
-    # D00002: İstanbul -> Eskişehir ama araç İstanbul'dan Yalova'ya,
-    # sonra Yalova'dan Eskişehir'e gidiyor. İstanbul -> Eskişehir direkt yok
-    # Bu geçerli çünkü İstanbul Eskişehir'den önce ziyaret ediliyor
-    dogrula_rota_gecerliligi(df)  # aslında bu geçerli
+    # Rota sıralama sonrası: İstanbul, Yalova, Eskişehir
+    # D00002 Eskişehir->Yalova diyor ama Eskişehir sonra geliyor = hata
+    with pytest.raises(SimulasyonHatasi, match="sırası yanlış"):
+        dogrula_rota_gecerliligi(df)
 
 
-def test_ters_rota_hata():
-    """Talep varıştan çıkışa gidiyorsa hata."""
+def test_ters_rota_reddedilir():
+    """Araç A->B gidiyor ama talep B->A diyor — reddedilmeli."""
     df = pd.DataFrame({
-        "Araç ID": ["V0001"],
-        "Araç Tipi": ["Spot"],
-        "Araç türü": ["Tır"],
-        "Çıkış": ["Yalova"],
-        "Varış": ["İstanbul"],
-        "Çıkış Tarihi": ["29.06.2026"],
-        "Çıkış Saati": ["09:00"],
-        "Varış Tarihi": ["29.06.2026"],
-        "Varış Saati": ["10:00"],
-        "Talep ID": ["D00001"],
-        "Taşınan Desi": [5000],
-        "Yolculuk süresi": [56],
-        "Çıkış elleçleme süresi": [80],
-        "Varış elleçleme süresi": [80],
-        "Toplam maliyet": [5000.0],
-        "SLA cezası": [0.0],
+        "Araç ID": ["V0001", "V0001"],
+        "Araç Tipi": ["Spot", "Spot"],
+        "Araç türü": ["Tır", "Tır"],
+        "Çıkış": ["İstanbul", "Yalova"],
+        "Varış": ["Yalova", "İstanbul"],
+        "Çıkış Tarihi": ["29.06.2026", "29.06.2026"],
+        "Çıkış Saati": ["09:00", "11:00"],
+        "Varış Tarihi": ["29.06.2026", "29.06.2026"],
+        "Varış Saati": ["10:00", "12:00"],
+        "Talep ID": ["D00001", "D00002"],
+        "Taşınan Desi": [5000, 3000],
+        "Yolculuk süresi": [56, 56],
+        "Çıkış elleçleme süresi": [80, 80],
+        "Varış elleçleme süresi": [80, 80],
+        "Toplam maliyet": [5000.0, 0.0],
+        "SLA cezası": [0.0, 0.0],
     })
-    # Tek durak: Yalova -> İstanbul. Talep de Yalova -> İstanbul.
-    # Bu aslında geçerli — çıkış varıştan önce
-    dogrula_rota_gecerliligi(df)
+    # Rota: İstanbul -> Yalova -> İstanbul (gidiş-dönüş)
+    # D00002: Yalova -> İstanbul, Yalova idx=1, İstanbul idx=0 → hata
+    with pytest.raises(SimulasyonHatasi, match="sırası yanlış"):
+        dogrula_rota_gecerliligi(df)
+
+
+# --- Zaman çakışması ---
+
+def test_zaman_cakismasi_yok():
+    """Seferler sıralı — çakışma yok."""
+    df = pd.DataFrame({
+        "Araç ID": ["V0001", "V0001"],
+        "Araç Tipi": ["Spot", "Spot"],
+        "Araç türü": ["Tır", "Tır"],
+        "Çıkış": ["İstanbul", "Yalova"],
+        "Varış": ["Yalova", "Eskişehir"],
+        "Çıkış Tarihi": ["29.06.2026", "29.06.2026"],
+        "Çıkış Saati": ["09:00", "11:00"],
+        "Varış Tarihi": ["29.06.2026", "29.06.2026"],
+        "Varış Saati": ["10:00", "13:00"],
+        "Talep ID": ["D00001", "D00002"],
+        "Taşınan Desi": [5000, 3000],
+        "Yolculuk süresi": [56, 56],
+        "Çıkış elleçleme süresi": [80, 80],
+        "Varış elleçleme süresi": [80, 80],
+        "Toplam maliyet": [5000.0, 0.0],
+        "SLA cezası": [0.0, 0.0],
+    })
+    dogrula_zaman_cakismasi(df)
+
+
+def test_zaman_cakismasi_hata():
+    """Araç 10:30'da varıyor ama 10:00'da yeni sefere çıkıyor — imkansız."""
+    df = pd.DataFrame({
+        "Araç ID": ["V0001", "V0001"],
+        "Araç Tipi": ["Spot", "Spot"],
+        "Araç türü": ["Tır", "Tır"],
+        "Çıkış": ["İstanbul", "Yalova"],
+        "Varış": ["Yalova", "Eskişehir"],
+        "Çıkış Tarihi": ["29.06.2026", "29.06.2026"],
+        "Çıkış Saati": ["09:00", "10:00"],
+        "Varış Tarihi": ["29.06.2026", "29.06.2026"],
+        "Varış Saati": ["10:30", "13:00"],
+        "Talep ID": ["D00001", "D00002"],
+        "Taşınan Desi": [5000, 3000],
+        "Yolculuk süresi": [56, 56],
+        "Çıkış elleçleme süresi": [80, 80],
+        "Varış elleçleme süresi": [80, 80],
+        "Toplam maliyet": [5000.0, 0.0],
+        "SLA cezası": [0.0, 0.0],
+    })
+    with pytest.raises(SimulasyonHatasi, match="zaman çakışması"):
+        dogrula_zaman_cakismasi(df)
