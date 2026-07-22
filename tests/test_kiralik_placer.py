@@ -167,3 +167,17 @@ def test_cikis_saati_17_sadece_17_talep_varsa(kisitlar):
     }])
     servisler, _, _, _ = kiralik_servisleri_yerlestir(kisitlar, df, BASLANGIC)
     assert servisler[0].cikis_ani.hour == 17
+
+
+def test_cikis_saati_arac_basina_ellecleme(kisitlar):
+    # Hat adet=12; 09:00'da 24.000 desi => araç başına 2.000 => elleçleme
+    # ceil(2000*0.01)=20 dk => çıkış 09:20. Toplam yük (24.000) üzerinden
+    # hesaplansaydı 240 dk (13:00) çıkardı — bu yanlış ve maliyetle çelişirdi.
+    df = pd.DataFrame([{
+        "tarih": pd.Timestamp(BASLANGIC.date()),
+        "cikis": "Mersin", "varis": "Kocaeli",
+        "toplam_desi": 24000, "slot": "09:00",
+    }])
+    servisler, _, _, _ = kiralik_servisleri_yerlestir(kisitlar, df, BASLANGIC)
+    assert servisler[0].cikis_ani.hour == 9
+    assert servisler[0].cikis_ani.minute == 20

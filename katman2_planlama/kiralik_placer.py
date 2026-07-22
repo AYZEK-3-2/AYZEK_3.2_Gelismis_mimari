@@ -94,11 +94,14 @@ def kiralik_servisleri_yerlestir(
             kalan_09 = desi_09 - yuk_09
             kalan_17 = desi_17 - yuk_17
 
-            ellecleme_dk = math.ceil(yuk_desi * config.ELLECLEME_DK_PER_DESI)
+            # Çıkış elleçlemesi araç başınadır: her araç yalnız kendi payını yükler.
+            # Toplam yük (yuk_desi) üzerinden hesaplarsak adet>1 hatlarda çıkış saati
+            # gereksiz gecikir ve aşağıdaki maliyet hesabıyla (yuk_per_arac) çelişir.
+            yuk_per_arac = yuk_desi / hat.adet if hat.adet > 0 else 0.0
+            ellecleme_dk = math.ceil(yuk_per_arac * config.ELLECLEME_DK_PER_DESI)
             cikis_ani = datetime.combine(tarih, datetime.min.time().replace(hour=baz_saat)) \
                 + timedelta(minutes=ellecleme_dk)
 
-            yuk_per_arac = yuk_desi / hat.adet if hat.adet > 0 else 0.0
             for _ in range(hat.adet):
                 servis = Servis(
                     arac_tipi=hat.arac_turu,
