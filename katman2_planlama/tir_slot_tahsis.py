@@ -69,8 +69,9 @@ def tir_slot_tahsis(
     --------
     tir_servisleri  : oluşturulan spot tır Servis nesneleri
     kalan_talep_df  : tır'ın karşılamadığı artık talep
-    kapasite        : güncellenmiş kapasite defteri
-    rapor_df        : gün x hat → tır sefer sayısı + kalan slot özeti
+    kapasite        : günlük tır bütçesi (değişmez — slot günlük sıfırlanır);
+                      tahsis (TM, gün) bazında yapılır, per-gün kalan rapor_df'de
+    rapor_df        : gün x hat → tır sefer sayısı + o günkü kalan slot özeti
     """
     tir_kap = kisitlar.arac_tipleri["Tır"].kapasite_desi
     alternatifler = [ad for ad in kisitlar.arac_tipleri if ad != "Tır"]
@@ -109,13 +110,25 @@ def tir_slot_tahsis(
     tir_servisleri: list[Servis] = []
     rapor_satirlar: list[dict] = []
 
+    # Tır slotu GÜNLÜK kapasitedir (00:00'da sıfırlanır). Bütçe (TM, gün)
+    # anahtarlı tutulmalı; tek per-TM sayaç 7 güne yayılırsa haftalık tahsis
+    # tek günlük bütçeyle sınırlanıp ~7× eksik kalır. Her (TM, gün) için başlangıç
+    # bütçesi = kiralıktan sonra kalan günlük slot (kapasite.tir_kalan[tm]).
+    gun_slot: dict[tuple, int] = {}
+
+    def _slot_kalan(tm: str, gun) -> int:
+        anahtar = (tm, gun)
+        if anahtar not in gun_slot:
+            gun_slot[anahtar] = kapasite.tir_kalan.get(tm, 0)
+        return gun_slot[anahtar]
+
     for aday in adaylar:
         cikis, varis = aday["cikis"], aday["varis"]
         tarih = aday["tarih"]
         slot = aday["slot"]
 
-        slot_c = kapasite.tir_kalan.get(cikis, 0)
-        slot_v = kapasite.tir_kalan.get(varis, 0)
+        slot_c = _slot_kalan(cikis, tarih)
+        slot_v = _slot_kalan(varis, tarih)
         if slot_c == 0 or slot_v == 0:
             continue
 
@@ -135,8 +148,8 @@ def tir_slot_tahsis(
                 duraklar=(cikis, varis),
                 cikis_ani=cikis_ani,
             ))
-            kapasite.tir_slot_dus(cikis, 1)
-            kapasite.tir_slot_dus(varis, 1)
+        gun_slot[(cikis, tarih)] -= tir_sayisi
+        gun_slot[(varis, tarih)] -= tir_sayisi
 
         df.at[aday["idx"], "kalan_desi"] = max(0.0, kalan_desi - tir_sayisi * tir_kap)
 
@@ -146,8 +159,8 @@ def tir_slot_tahsis(
             "varis": varis,
             "slot": slot,
             "tir_sayisi": tir_sayisi,
-            "slot_sonrasi_cikis": kapasite.tir_kalan.get(cikis, 0),
-            "slot_sonrasi_varis": kapasite.tir_kalan.get(varis, 0),
+            "slot_sonrasi_cikis": gun_slot[(cikis, tarih)],
+            "slot_sonrasi_varis": gun_slot[(varis, tarih)],
         })
 
     # --- 4. AŞAMA: çıktıları hazırla ---

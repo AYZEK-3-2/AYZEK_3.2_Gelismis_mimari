@@ -101,6 +101,20 @@ def test_kalan_desi_dogru_guncellenir(kisitlar, kapasite):
     assert kalan.empty
 
 
+def test_slot_butcesi_gun_bazli(kisitlar, kapasite):
+    # Tır slotu GÜNLÜK sıfırlanır. Aynı hat A->B iki farklı günde, her gün
+    # 10'luk slotu aşacak talep (15 tır yükü). Her gün ayrı 10 bütçe olmalı →
+    # toplam 20 tır. Eski tek-sayaç kod tüm haftayı 10'la sınırlar (bug).
+    tir_kap = kisitlar.arac_tipleri["Tır"].kapasite_desi
+    df = pd.DataFrame([
+        _talep("A", "B", 15 * tir_kap, tarih=date(2026, 6, 29)),
+        _talep("A", "B", 15 * tir_kap, tarih=date(2026, 6, 30)),
+    ])
+    servisler, _, _, rapor = tir_slot_tahsis(kisitlar, df, kapasite)
+    assert len(servisler) == 20  # her gün 10; bug'lı kod 10 verirdi
+    assert sorted(rapor["tir_sayisi"].tolist()) == [10, 10]
+
+
 # --- Kabul testleri ---
 
 def test_kabul_slot_asimi_yok():
@@ -144,7 +158,10 @@ def test_kabul_kisa_hat_yok():
         assert kisitlar.mesafe_km(*s.duraklar) >= _MIN_KM
 
 
-def test_kabul_toplam_sinirli():
+def test_kabul_gunluk_slot_asilmiyor():
+    # Gerçek invariant: hiçbir (TM, gün) o TM'nin GÜNLÜK tır bütçesini aşmamalı.
+    # (Eski test tüm haftayı tek-gün bütçesiyle sınırlıyordu — bug'ın kendisiydi.)
+    from collections import Counter
     from katman0_veri.yukleyici import veriyi_yukle
     import config
     from katman2_planlama.kiralik_placer import kiralik_servisleri_yerlestir
@@ -153,8 +170,7 @@ def test_kabul_toplam_sinirli():
     _, _, kap, _ = kiralik_servisleri_yerlestir(
         kisitlar, _bos_tahmin_df(), config.TAHMIN_BASLANGIC
     )
-    toplam_slot = sum(kap.tir_kalan.values())
-    tir_kap = kisitlar.arac_tipleri["Tır"].kapasite_desi
+    gunluk_butce = dict(kap.tir_kalan)  # kiralıktan sonra günlük spot tır slotu
 
     satirlar = []
     for gun in range(7):
@@ -165,4 +181,13 @@ def test_kabul_toplam_sinirli():
                                   "slot": "09:00", "kalan_desi": 10_000_000.0})
     servisler, _, _, _ = tir_slot_tahsis(kisitlar, pd.DataFrame(satirlar), kap)
 
-    assert len(servisler) <= toplam_slot // 2 + 1
+    dokunus = Counter()
+    for s in servisler:
+        gun = s.cikis_ani.date()
+        dokunus[(s.duraklar[0], gun)] += 1
+        dokunus[(s.duraklar[-1], gun)] += 1
+    for (tm, gun), n in dokunus.items():
+        assert n <= gunluk_butce[tm], f"{tm} {gun}: {n} > günlük {gunluk_butce[tm]}"
+
+    # Ve per-gün doğru tahsisle toplam, tek-gün bütçesinin çok üstünde olmalı
+    assert len(servisler) > sum(gunluk_butce.values()) // 2
