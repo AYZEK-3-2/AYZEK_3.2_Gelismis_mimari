@@ -131,7 +131,15 @@ def graf_kur(
 
     for aday in servis_adaylari:
         servis = aday.servis
-        yuk_per_durak = {tm: aday.kapasite_desi for tm in servis.duraklar}
+        # Ara duraklarda konsolidasyon = indir + yükle → elleçleme 2× kapasite.
+        # servis_havuzu.py'nin 3-durak maliyet hesabıyla aynı konvansiyon; yoksa
+        # graf, ara durak elleçlemesini yarım sayıp varış anını iyimser hesaplar
+        # ve SLA açısından infizibl akışları kabul edebilir.
+        son = len(servis.duraklar) - 1
+        yuk_per_durak = {
+            tm: aday.kapasite_desi * (2 if 0 < i < son else 1)
+            for i, tm in enumerate(servis.duraklar)
+        }
         for cikis_tm, varis_tm in servis.bacaklar():
             kaynak_an = servis.ziyaret_ani(cikis_tm, kisitlar, yuk_per_durak)
             hedef_an = servis.ziyaret_ani(varis_tm, kisitlar, yuk_per_durak)
