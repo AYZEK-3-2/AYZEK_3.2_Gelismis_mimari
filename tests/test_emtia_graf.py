@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Emtia toplulaştırma, zaman-genişletilmiş graf ve akış ayrıştırma testleri
 (issue #19, mimari §5.4)."""
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -129,6 +129,20 @@ def test_graf_kur_dugum_anlari_ziyaret_ani_ile_birebir():
     servis_kenari = next(k for k in kenarlar if k.tur == "servis")
     assert servis_kenari.kaynak == Dugum("A", datetime(2026, 6, 29, 9, 0))
     assert servis_kenari.hedef == Dugum("B", datetime(2026, 6, 29, 14, 0))  # 09:00 + 5h
+
+
+def test_graf_kur_ara_durak_ellecleme_2x():
+    # 3 durak A->B->C, kapasite 10.000, her bacak 5h (300 dk). Ara durak (B)
+    # konsolidasyon elleçlemesi 2×kapasite = ceil(20000*0.01)=200 dk olmalı
+    # (servis_havuzu 3-durak maliyetiyle tutarlı). C varış anı:
+    # 09:00 + 300 (A→B) + 200 (B elleçleme) + 300 (B→C) = 09:00 + 800 dk = 22:20.
+    # Eski 1× kod 100 dk sayıp 21:40 verirdi.
+    kisitlar = FakeKisitlarSeyir(5.0)
+    cikis_ani = datetime(2026, 6, 29, 9, 0)
+    aday = _aday(("A", "B", "C"), cikis_ani, kapasite=10000)
+    _, kenarlar = graf_kur([aday], kisitlar)
+    c_kenar = next(k for k in kenarlar if k.tur == "servis" and k.hedef.tm == "C")
+    assert c_kenar.hedef.an == cikis_ani + timedelta(minutes=800)
 
 
 def test_graf_kur_bekleme_kenari_ardisik_anlar_arasinda():
