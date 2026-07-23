@@ -9,7 +9,14 @@ Bu paket üç parçadan oluşuyor:
 """
 from .bolme import Kat, walk_forward_bol
 from .metrik import wape
-from .model import KatSonuc, backtest, egit_ve_tahmin, naif_tahmin, rapor_yazdir
+from .model import (
+    KatSonuc,
+    backtest,
+    egit_ve_tahmin,
+    naif_tahmin,
+    rapor_yazdir,
+    tahmin_uret,
+)
 from .panel import (
     FEATURE_KOLONLARI,
     SLOTLAR,
@@ -17,10 +24,13 @@ from .panel import (
     egitim_paneli_kur,
     feature_ekle,
     hedef_donustur,
+    tahmin_paneli_kur,
 )
+from .yazici import ID_SIRA, talep_id_ata, talep_tahmini_yaz
 
 __all__ = [
     "egitim_paneli_kur",
+    "tahmin_paneli_kur",
     "feature_ekle",
     "hedef_donustur",
     "FEATURE_KOLONLARI",
@@ -34,11 +44,8 @@ __all__ = [
     "backtest",
     "rapor_yazdir",
     "KatSonuc",
+    "tahmin_uret",
+    "talep_id_ata",
+    "talep_tahmini_yaz",
+    "ID_SIRA",
 ]
-
-
-def tahmin_uret(veri):
-    # TODO(issue #9, #11): LightGBM eğitimi + backtest + Talep-tahmini.xlsx
-    # Panel ve feature altyapısı hazır (issue #8); model henüz yok.
-    print("katman1: panel + feature altyapısı hazır (issue #8); model issue #9'da")
-    return None

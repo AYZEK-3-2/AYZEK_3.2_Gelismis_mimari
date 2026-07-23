@@ -73,6 +73,32 @@ def egitim_paneli_kur(veri: Kisitlar) -> pd.DataFrame:
     return panel.sort_values(["cikis", "varis", "slot", "tarih"]).reset_index(drop=True)
 
 
+def tahmin_paneli_kur(veri: Kisitlar) -> pd.DataFrame:
+    """Geçmiş + tahmin ufku (29 Haz–5 Tem) tek panelde.
+
+    Gelecek satırları desi=0 yer tutucu; feature'lar >= UFUK_GUN geriden
+    başladığı için tahmin haftasının lag/rolling'i yalnız GEÇMİŞE bakar
+    (5 Tem için bile lag_7 = 28 Haz = veri sonu). Böylece tahmin haftası için
+    feature'lar gerçek tahmin anında hesaplanabilir olur (yer tutucu 0'lar
+    kendi satırlarının feature'ını etkilemez).
+    """
+    import config
+
+    gecmis = egitim_paneli_kur(veri)
+    ufuk = pd.date_range(config.TAHMIN_BASLANGIC.date(), config.TAHMIN_BITIS.date(), freq="D")
+    hatlar = pd.DataFrame(veri.aktif_hatlar, columns=["cikis", "varis"])
+    gelecek = (
+        hatlar
+        .merge(pd.DataFrame({"tarih": ufuk}), how="cross")
+        .merge(pd.DataFrame({"slot": list(SLOTLAR)}), how="cross")
+    )
+    gelecek["desi"] = 0
+    gelecek = gelecek[["cikis", "varis", "tarih", "slot", "desi"]]
+
+    panel = pd.concat([gecmis, gelecek], ignore_index=True)
+    return panel.sort_values(["cikis", "varis", "slot", "tarih"]).reset_index(drop=True)
+
+
 def feature_ekle(panel: pd.DataFrame) -> pd.DataFrame:
     """Panele sızıntısız feature kolonları ekler.
 
