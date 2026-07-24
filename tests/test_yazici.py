@@ -52,6 +52,15 @@ def test_yazici_format_sablonla_ayni(tmp_path):
     assert set(okunan["Talep Tamamlama Saati"]) == {"09:00:00", "17:00:00"}
 
 
+def test_onceden_atanmis_id_korunur(tmp_path):
+    # Tek-kaynak akışı (#17): ID önceden atanmışsa yazıcı onu kullanmalı,
+    # yeniden atamamalı — planlayıcıyla aynı ID'ler garanti olsun.
+    df = talep_id_ata(_sentetik_tahmin_df())
+    df.loc[df["talep_id"] == "D00003", "talep_id"] = "D00003-ozel"  # dış ID
+    cikti = talep_tahmini_yaz(df, tmp_path / "t.xlsx")
+    assert "D00003-ozel" in set(cikti["Talep ID"])
+
+
 def test_zero_floor(tmp_path):
     df = _sentetik_tahmin_df()
     df.loc[0, "tahmin_desi"] = -5.0  # negatif tahmin

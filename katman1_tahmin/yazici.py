@@ -40,10 +40,18 @@ def talep_id_ata(tahmin_df: pd.DataFrame) -> pd.DataFrame:
 def talep_tahmini_yaz(tahmin_df: pd.DataFrame, dosya) -> pd.DataFrame:
     """`tahmin_df` (tarih, cikis, varis, slot, tahmin_desi) → Talep-tahmini.xlsx.
 
-    Negatifler 0'a çekilir (zero-floor), ID atanır, şablon formatında yazılır.
-    Yazılan DataFrame'i döner (test/doğrulama için).
+    Negatifler 0'a çekilir (zero-floor), şablon formatında yazılır. Yazılan
+    DataFrame'i döner (test/doğrulama için).
+
+    ID SÖZLEŞMESİ — önerilen akış (#17): ID'yi `talep_id_ata` ile bir kez ata,
+    ID'li talebi hem buraya hem planlayıcıya ver (tek doğruluk kaynağı). Bu
+    fonksiyon `talep_id` kolonu VARSA onu kullanır (yeniden atamaz), yoksa
+    kendisi atar — böylece iki dosya arasında ID uyuşmazlığı imkânsız olur.
     """
-    df = talep_id_ata(tahmin_df)
+    if "talep_id" in tahmin_df.columns:
+        df = tahmin_df.sort_values("talep_id", kind="stable").reset_index(drop=True)
+    else:
+        df = talep_id_ata(tahmin_df)
     desi = df["tahmin_desi"].astype("float64").clip(lower=0.0)  # zero-floor
 
     cikti = pd.DataFrame({
