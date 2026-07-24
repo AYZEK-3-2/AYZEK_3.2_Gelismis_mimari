@@ -80,12 +80,45 @@ def test_gercek_4046_satir_ve_kocaeli_yok(gercek_tahmin):
     assert (gercek_tahmin["tahmin_desi"] >= 0).all()  # zero-floor
 
 
-def test_gercek_yazici_ve_id_sozlesmesi(gercek_tahmin, tmp_path):
+def test_gercek_4046_ve_id_ardisik(gercek_tahmin, tmp_path):
     cikti = talep_tahmini_yaz(gercek_tahmin, tmp_path / "Talep-tahmini.xlsx")
     assert len(cikti) == 4046
     assert cikti["Talep ID"].is_unique
     assert cikti["Talep ID"].iloc[0] == "D00001"
-    # ID sözleşmesi: plan'daki bölünmüş bir ID'nin (D00001-1) kökü bu dosyada var
-    tahmin_idler = set(cikti["Talep ID"])
-    bolunmus = "D00001-1"
-    assert bolunmus.split("-")[0] in tahmin_idler
+
+
+def test_id_sozlesmesi_plan_yazicisiyla(tmp_path):
+    """ORTAK entegrasyon testi (#11 kabul kriteri): plan yazıcısının (#16)
+    ürettiği plandaki bölünmüş ID'lerin (D00001-1) kökü, tahmin dosyasındaki
+    ID'lerle birebir eşleşmeli — yoksa jüri değerlendirmesi dışı kalır.
+    """
+    from datetime import datetime
+
+    from katman2_planlama.plan_yazici import (
+        AracPlan,
+        BacakAtama,
+        TalepAtama,
+        plan_yaz,
+    )
+
+    # 1) Tahmin dosyasını üret, kanonik ID'leri al
+    tahmin = talep_tahmini_yaz(_sentetik_tahmin_df(), tmp_path / "Talep-tahmini.xlsx")
+    tahmin_idler = set(tahmin["Talep ID"])
+    kok = tahmin["Talep ID"].iloc[0]  # D00001
+
+    # 2) Bu talebi 2 araca bölen bir plan kur (D00001-1, D00001-2)
+    bacak = BacakAtama(
+        cikis="İstanbul", varis="Yalova",
+        cikis_ani=datetime(2026, 6, 29, 9, 0),
+        varis_ani=datetime(2026, 6, 29, 10, 0),
+        seyir_dk=56,
+        talepler=[
+            TalepAtama(f"{kok}-1", 2.0, True, 0.0),
+            TalepAtama(f"{kok}-2", 1.5, True, 0.0),
+        ],
+    )
+    plan_df = plan_yaz([AracPlan("Tır", False, [bacak], 1000.0)])
+
+    # 3) Plandaki her talep ID'nin kökü tahmin dosyasında olmalı
+    for pid in plan_df["Talep ID"]:
+        assert str(pid).split("-")[0] in tahmin_idler, f"{pid} kökü tahminde yok"
