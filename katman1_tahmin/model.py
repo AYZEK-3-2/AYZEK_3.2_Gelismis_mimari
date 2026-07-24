@@ -24,7 +24,13 @@ from katman0_veri import Kisitlar
 
 from .bolme import walk_forward_bol
 from .metrik import wape
-from .panel import FEATURE_KOLONLARI, SLOTLAR, egitim_paneli_kur, feature_ekle
+from .panel import (
+    FEATURE_KOLONLARI,
+    SLOTLAR,
+    egitim_paneli_kur,
+    feature_ekle,
+    tahmin_paneli_kur,
+)
 
 # Backtest ile ELENEN alternatifler (tekrar denemeyin, veri karar verdi):
 #   - log1p hedef dönüşümü: Haziran katlarında belirgin kötü (WAPE weighted,
@@ -135,6 +141,27 @@ def backtest(
             )
         )
     return sonuclar
+
+
+def tahmin_uret(veri: Kisitlar, seedler: tuple[int, ...] = SEEDLER) -> pd.DataFrame:
+    """Tahmin ufku (29 Haz–5 Tem) için desi tahmini üretir.
+
+    Tüm geçmişle eğitilir, tahmin haftasını tahmin eder (direct multi-step;
+    lag/rolling yalnız geçmişe bakar). Döner: 4.046 satır DataFrame —
+    (tarih, cikis, varis, slot, tahmin_desi), negatifler 0'a çekilmiş.
+    """
+    import config
+
+    feat = feature_ekle(tahmin_paneli_kur(veri))
+    ufuk_bas = pd.Timestamp(config.TAHMIN_BASLANGIC.date())
+    egitim = feat[feat["tarih"] < ufuk_bas]
+    ufuk = feat[feat["tarih"] >= ufuk_bas]
+
+    tahmin = egit_ve_tahmin(egitim, ufuk, seedler)  # zero-floor içeride
+
+    out = ufuk[["tarih", "cikis", "varis", "slot"]].copy()
+    out["tahmin_desi"] = tahmin
+    return out.reset_index(drop=True)
 
 
 def rapor_yazdir(sonuclar: list[KatSonuc]) -> bool:
