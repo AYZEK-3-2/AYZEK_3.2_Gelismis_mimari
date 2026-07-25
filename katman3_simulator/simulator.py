@@ -133,9 +133,19 @@ def dogrula_kiralik(df: pd.DataFrame, kiralik_hatlar) -> None:
 
 
 def dogrula_zaman_cakismasi(df: pd.DataFrame) -> None:
-    """Aynı araç aynı anda iki yerde olamaz."""
+    """Aynı araç aynı anda iki yerde olamaz.
+
+    Satır birimi (Araç ID, bacak, Talep ID) olduğu için tek bir bacak birden fazla
+    satır (birden fazla Talep ID) içerebilir — konsolidasyonda normal ve beklenen
+    durum. Bu yüzden önce BACAK bazında (Çıkış, Varış, Çıkış Tarihi, Çıkış Saati)
+    tekilleştirilir; aksi halde bir bacağın kendi varışı, aynı bacağın başka bir
+    talep satırındaki (aynı) çıkışıyla yanlışlıkla "çakışma" sayılır.
+    """
     for arac_id, grup in df.groupby("Araç ID"):
-        sirali = grup.sort_values(["Çıkış Tarihi", "Çıkış Saati"])
+        bacaklar = grup.drop_duplicates(
+            subset=["Çıkış", "Varış", "Çıkış Tarihi", "Çıkış Saati", "Varış Tarihi", "Varış Saati"]
+        )
+        sirali = bacaklar.sort_values(["Çıkış Tarihi", "Çıkış Saati"])
         satirlar = list(sirali.iterrows())
 
         for i in range(len(satirlar) - 1):
@@ -180,7 +190,11 @@ def _hesapla_maliyet(df: pd.DataFrame, kisitlar) -> list:
         )
 
         for (cikis, varis, _, _), bacak_df in bacaklar:
-            bacak_desi = int(bacak_df["Taşınan Desi"].sum())
+            # int() DEĞİL: "Taşınan Desi" tam sayı olmak zorunda değil (MILP'in
+            # ölçekli çözümü 0,01 desi hassasiyetinde kesirli değerler üretebilir).
+            # Kesme (int()), post-pass'in tam hassasiyetle hesapladığı maliyetten
+            # küçük ama gerçek bir sapmaya yol açar (kuruş kapısını kırar).
+            bacak_desi = float(bacak_df["Taşınan Desi"].sum())
             mesafe = kisitlar.mesafe_km(cikis, varis)
             seyir = kisitlar.seyir_saat(cikis, varis, arac_tipi_ad)
 
@@ -208,8 +222,6 @@ def _hesapla_sla(df: pd.DataFrame, kisitlar) -> list:
 
     for _, satir in df.iterrows():
         talep_id = satir["Talep ID"]
-        cikis = satir["Çıkış"]
-        varis = satir["Varış"]
         desi = float(satir["Taşınan Desi"])
 
         # Orijinal talep bilgisi
@@ -219,8 +231,18 @@ def _hesapla_sla(df: pd.DataFrame, kisitlar) -> list:
             continue
         talep_satiri = talep_satiri.iloc[0]
 
-        # SLA hedef gün
-        sla_gun = kisitlar.sla_gun(cikis, varis)
+        # SLA yalnız TALEBİN NİHAİ (orijinal) varış TM'sine ulaşan bacakta
+        # değerlendirilir — konsolideli/çok bacaklı bir teslimde ARA duraktaki
+        # bacak "Varış"ı orijinal hedeften farklıdır; onu nihai teslim sanıp SLA
+        # hesaplarsak (yanlış bir ara-mesafe sla_gun'u ve erken bir ara-varış anıyla)
+        # hatalı, çoğunlukla büyük bir ceza uydurulmuş olur. Ara bacaklarda SLA
+        # cezası zaten hep 0'dır (§8.2 muhasebe kuralı) — burada da atlanır.
+        if satir["Varış"] != talep_satiri["varis"]:
+            continue
+
+        # SLA hedef gün — talebin ORİJİNAL çıkış/varışına göre (bacağın kendi
+        # çıkış/varışına göre DEĞİL — konsolidasyonda bunlar farklı olabilir).
+        sla_gun = kisitlar.sla_gun(talep_satiri["cikis"], talep_satiri["varis"])
 
         # Deadline: talep tarihi + sla_gun gün, talep saatinde
         talep_tarihi = pd.Timestamp(talep_satiri["tarih"])
@@ -274,7 +296,7 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
     for _, satir in df.iterrows():
         cikis_gun = _gun_str(satir["Çıkış Tarihi"])
         varis_gun = _gun_str(satir["Varış Tarihi"])
-        desi = int(satir["Taşınan Desi"])
+        desi = float(satir["Taşınan Desi"])  # int() değil — bkz. _hesapla_maliyet notu
         cikis_tm = satir["Çıkış"]
         varis_tm = satir["Varış"]
 
@@ -290,7 +312,7 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
         bugun_oran, yarin_oran = gece_yarisi_bolme(varis_dakika, ell_sure)
 
         if yarin_oran > 0:
-            bugun_desi = int(desi * bugun_oran)
+            bugun_desi = desi * bugun_oran
             yarin_desi = desi - bugun_desi
             kapasite.ellecleme_ekle(varis_tm, varis_gun, bugun_desi)
             varis_dt = _tarihe_cevir(satir["Varış Tarihi"], satir["Varış Saati"])
@@ -299,10 +321,17 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
         else:
             kapasite.ellecleme_ekle(varis_tm, varis_gun, desi)
 
-        # Tır dokunuşu
-        if satir["Araç türü"] == "Tır":
-            kapasite.tir_dokunusu_ekle(cikis_tm, cikis_gun)
-            kapasite.tir_dokunusu_ekle(varis_tm, varis_gun)
+    # Tır dokunuşu — BACAK bazında (Araç ID + Çıkış + Varış + Çıkış Tarihi/Saati),
+    # satır bazında DEĞİL: bir bacakta birden fazla Talep ID satırı olabilir
+    # (konsolidasyon), ama araç o TM'ye yalnız BİR KEZ dokunur. Satır bazında
+    # sayarsak aynı dokunuş, o bacaktaki talep sayısı kadar çoğaltılmış olur.
+    tir_bacaklari = df[df["Araç türü"] == "Tır"].drop_duplicates(
+        subset=["Araç ID", "Çıkış", "Varış", "Çıkış Tarihi", "Çıkış Saati",
+                "Varış Tarihi", "Varış Saati"]
+    )
+    for _, bacak in tir_bacaklari.iterrows():
+        kapasite.tir_dokunusu_ekle(bacak["Çıkış"], _gun_str(bacak["Çıkış Tarihi"]))
+        kapasite.tir_dokunusu_ekle(bacak["Varış"], _gun_str(bacak["Varış Tarihi"]))
 
     ihlaller = kapasite.dogrula()
     if ihlaller:
