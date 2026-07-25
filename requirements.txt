@@ -1,7 +1,8 @@
-pandas==2.3.3
+numpy==2.3.5
+pandas==3.0.2
 openpyxl==3.1.5
 python-calamine==0.8.2
-lightgbm==4.7.0
-scikit-learn==1.7.1
-ortools==9.15.6755
-pytest==9.0.3
+lightgbm==4.6.0
+scikit-learn==1.8.0
+pytest==9.1.1
+# ortools  # CP-SAT/MILP icin (issue #18-22, henuz aktif degil)

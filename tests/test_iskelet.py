@@ -33,5 +33,6 @@ def test_veri_dosyalari_yerinde():
     assert (config.SABLON_KLASORU / "TALEP_TAHMINI_sablon.xlsx").exists()
 
 
-def test_bos_akis_calisiyor():
-    main.main()  # katmanlar boşken bile akış hatasız dönmeli
+def test_bos_akis_calisiyor(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["main.py"])
+    main.main()  # uçtan uca akış hatasız dönmeli

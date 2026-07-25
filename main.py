@@ -1,38 +1,108 @@
 # -*- coding: utf-8 -*-
-"""Tek giriş noktası: veri -> tahmin -> plan -> doğrulama -> çıktı.
+"""Tek giris noktasi: veri -> tahmin -> plan -> dogrulama -> cikti.
 
-Jüri runtime'ı tahmin + planlama toplamı olarak ölçüyor, o yüzden
-her aşamanın süresi baştan beri loglanıyor. Şimdilik iskelet;
-katmanlar doldukça bu akışın kendisi değişmeyecek.
+Juri runtime'i tahmin + planlama toplami olarak oluyor, o yuzden
+her asamanin suresi loglanıyor. --fast greedy, --full MILP+LNS (henuz hazir degil).
+
+Kapi basarisizliginda hicbir dosya yazilmaz (gecici klasor kullanilir,
+kapılar gecerse kopyalanir).
 """
-import time
+from __future__ import annotations
 
+import argparse
+import random
+import shutil
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+import numpy as np
+
+import config
 from katman0_veri import veriyi_yukle
-from katman1_tahmin import tahmin_uret
+from katman1_tahmin import tahmin_uret, talep_id_ata, talep_tahmini_yaz
 from katman2_planlama import plan_uret
 from katman3_simulator import dogrula_ve_yaz
+from katman3_simulator.simulator import SimulasyonHatasi
 
 
-def main():
+def _seed_ayarla(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+
+
+def _args_parse() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="AYZEK 3.2 - Lojistik Optimizasyon")
+    p.add_argument("--fast", action="store_true", help="Greedy mod (varsayilan)")
+    p.add_argument("--full", action="store_true", help="MILP+LNS (henuz hazir degil)")
+    p.add_argument(
+        "--milp-minutes", type=int, default=10, metavar="N",
+        help="MILP zaman butcesi dakika (--full ile, varsayilan 10)",
+    )
+    p.add_argument(
+        "--seed", type=int, default=config.SEED,
+        help=f"Determinizm icin seed (varsayilan {config.SEED})",
+    )
+    p.add_argument(
+        "--output-dir", type=str, default=str(config.CIKTI_KLASORU),
+        help="Cikti klasoru (varsayilan cikti/)",
+    )
+    return p.parse_args()
+
+
+def main() -> None:
+    args = _args_parse()
+    _seed_ayarla(args.seed)
+    cikti_dir = Path(args.output_dir)
+
+    if args.full:
+        print("Uyari: --full modu henuz hazir degil, greedy kullaniliyor.")
+
     t0 = time.perf_counter()
-    veri = veriyi_yukle()
-    t1 = time.perf_counter()
 
-    tahmin = tahmin_uret(veri)
-    t2 = time.perf_counter()
+    try:
+        veri = veriyi_yukle()
+        t1 = time.perf_counter()
 
-    plan = plan_uret(veri, tahmin)
-    t3 = time.perf_counter()
+        tahmin_raw = tahmin_uret(veri)
+        tahmin = talep_id_ata(tahmin_raw)
+        t2 = time.perf_counter()
 
-    dogrula_ve_yaz(veri, tahmin, plan)
-    t4 = time.perf_counter()
+        # Dosyalari once gecici klasore yaz; kapılar gecmeden cikti/ klasorune tasinmaz.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_talep = str(Path(tmp) / "Talep-tahmini.xlsx")
+            tahmin_xlsx = talep_tahmini_yaz(tahmin, tmp_talep)
+
+            tmp_plan = plan_uret(veri, tahmin, cikti_dizini=tmp)
+            t3 = time.perf_counter()
+
+            dogrula_ve_yaz(veri, tahmin_xlsx, tmp_plan)
+            t4 = time.perf_counter()
+
+            # Kapılar gecti — kalici konuma kopyala
+            cikti_dir.mkdir(parents=True, exist_ok=True)
+            talep_yolu = str(cikti_dir / "Talep-tahmini.xlsx")
+            plan_yolu = str(cikti_dir / "Tasima-plani.xlsx")
+            shutil.copy2(tmp_talep, talep_yolu)
+            shutil.copy2(tmp_plan, plan_yolu)
+
+    except SimulasyonHatasi as e:
+        print(f"\nKAPI HATASI - dosya yazilmadi:\n{e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"\nHATA: {e}", file=sys.stderr)
+        sys.exit(1)
 
     print()
-    print(f"veri yükleme : {t1 - t0:6.1f} sn")
+    print(f"veri yukleme : {t1 - t0:6.1f} sn")
     print(f"tahmin       : {t2 - t1:6.1f} sn")
     print(f"planlama     : {t3 - t2:6.1f} sn")
-    print(f"doğrulama    : {t4 - t3:6.1f} sn")
+    print(f"dogrulama    : {t4 - t3:6.1f} sn")
     print(f"TOPLAM       : {t4 - t0:6.1f} sn")
+    print(f"\nCiktilar ({args.output_dir}/):")
+    print(f"  {talep_yolu}")
+    print(f"  {plan_yolu}")
 
 
 if __name__ == "__main__":
