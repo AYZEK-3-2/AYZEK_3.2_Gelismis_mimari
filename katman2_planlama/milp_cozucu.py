@@ -159,13 +159,17 @@ def milp_coz(
     # --- 1) x[s] -------------------------------------------------------------------------
     toplam_desi = float(eslesme_tablosu["desi"].sum())
     x: dict[ServisAdayi, cp_model.IntVar] = {}
-    for aday in essiz_adaylar:
+    for i, aday in enumerate(essiz_adaylar):
         sayim = sayimlar[aday]
         if aday.zorunlu:
             x[aday] = model.NewConstant(sayim)
         else:
             ust_sinir = max(sayim, math.ceil(toplam_desi / aday.kapasite_desi))
-            x[aday] = model.NewIntVar(0, ust_sinir, f"x_{id(aday)}")
+            # Değişken adı `id(aday)` (bellek adresi) DEĞİL, sıra indeksiyle — id()
+            # koşudan koşuya rastgele değişir (ASLR), model proto'sunu (ve CP-SAT'ın
+            # üzerinde çalıştığı iç temsili) farklılaştırıp determinizmi bozar; bu
+            # canlı testle ölçülüp doğrulandı.
+            x[aday] = model.NewIntVar(0, ust_sinir, f"x_{i}")
 
     # --- 2) f[emtia, kenar] — yalnızca zamanla ilgili kenarlarda ------------------------
     en_erken_dogus: dict[str, object] = (
@@ -210,9 +214,9 @@ def milp_coz(
 
         emtia_kenarlari[emtia.emtia_id] = ilgili
         ust_sinir_desi = int(round(emtia_toplam_desi[emtia.emtia_id] * olcek))
-        for kenar in ilgili:
+        for j, kenar in enumerate(ilgili):
             f[(emtia.emtia_id, kenar)] = model.NewIntVar(
-                0, ust_sinir_desi, f"f_{emtia.emtia_id}_{id(kenar)}"
+                0, ust_sinir_desi, f"f_{emtia.emtia_id}_{j}"
             )
 
     # --- 3) Akış korunumu + talep karşılama ---------------------------------------------
@@ -224,7 +228,10 @@ def milp_coz(
             if e_id == emtia.emtia_id:
                 dugumler_e.add(Dugum(cikis, dogus_ani))
 
-        for dugum in dugumler_e:
+        # Determinizm: `set` iterasyon sırası PYTHONHASHSEED'e (string hash'i) bağlı,
+        # koşudan koşuya değişebilir — kısıt/değişken oluşturma sırası CP-SAT'ın eşit-
+        # maliyetli çözümler arasındaki seçimini etkileyebilir. Sıralı işle.
+        for dugum in sorted(dugumler_e, key=lambda d: (d.tm, d.an)):
             icdogru = [
                 f[(emtia.emtia_id, k)] for k in ilgili if k.hedef == dugum
             ]
@@ -236,12 +243,20 @@ def milp_coz(
             ))
 
             if dugum.tm == emtia.varis:
+                # Varış TM'sine ulaşan akış TAMAMEN o düğümde teslim edilir — aynı
+                # düğümden kısmen devam etmesine (bekleme dahil) izin VERİLMEZ.
+                # Aksi halde "kısmi teslim + kısmi bekleyerek devam" belirsizliği
+                # oluşur: `emtia_graf.akis_ayristir` (#19) yalnız kenar akışına bakar,
+                # düğümde ne kadarının "teslim" sayıldığını bilmez — bu iki yorumu
+                # ayıramayıp AkisTutarsizligi fırlatır. Varışa ulaşan yükün orada
+                # beklemesi için mantıklı bir sebep de yok (zaten hedefte).
+                model.Add(sum(disdogru) == 0)
                 t_var = model.NewIntVar(
                     0, int(round(emtia_toplam_desi[emtia.emtia_id] * olcek)),
-                    f"teslim_{emtia.emtia_id}_{id(dugum)}",
+                    f"teslim_{emtia.emtia_id}_{dugum.tm}_{dugum.an.isoformat()}",
                 )
                 teslim[(emtia.emtia_id, dugum)] = t_var
-                model.Add(sum(icdogru) + enjekte - sum(disdogru) == t_var)
+                model.Add(sum(icdogru) + enjekte == t_var)
             else:
                 model.Add(sum(icdogru) + enjekte == sum(disdogru))
 
@@ -336,14 +351,52 @@ def milp_coz(
     model.Minimize(sum(terimler))
 
     if warm_start:
-        hint_degisken = [x[aday] for aday in warm_start if aday in x]
-        hint_deger = [warm_start[aday] for aday in warm_start if aday in x]
-        if hint_degisken:
-            model.AddHint(hint_degisken, hint_deger)
+        # Zorunlu (kiralık) adaylar `x[aday]` sabittir (`NewConstant`), gerçek bir karar
+        # değişkeni değildir — `AddHint`e verilirse CP-SAT hata verir. Zaten x'leri
+        # sabit olduğu için hint'e ihtiyaçları da yok.
+        # `AddHint` TEK (değişken, değer) çifti alır (liste değil) — her ipucu için
+        # ayrı ayrı çağrılmalı.
+        for aday in warm_start:
+            if aday in x and not aday.zorunlu:
+                model.AddHint(x[aday], warm_start[aday])
 
     # --- 8) Çöz --------------------------------------------------------------------------
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = zaman_limit_sn
+    solver.parameters.max_deterministic_time = zaman_limit_sn
+    # BİLİNEN SINIRLAMA (canlı testle issue #21'de tespit edildi): `max_time_in_seconds`
+    # duvar saati bazlıdır ve bu iş yükünde deterministic_time'dan (iş birimi bazlı,
+    # gerçekten süreçler-arası sabit olan sınır) ~3-5x daha hızlı birikir — yani pratikte
+    # kesmeyi HER ZAMAN duvar saati yapar. Zaman sınırına gerçekten çarpılan (OPTIMAL
+    # ispatlanamayan, FEASIBLE'da kalan) "zor" pencerelerde bu, sistem yüküne göre koşudan
+    # koşuya FARKLI (ama yine geçerli) bir noktada durabiliyor — config.SEED'in "bit
+    # düzeyinde aynı" idealini bu dar durumda bozar. Bilinçli tercih: `max_deterministic_time`
+    # tek başına kullanılsa determinizm garanti edilir ama ölçülen oranla pencere başı süre
+    # ~3sn'den ~12sn'ye çıkıyor (bu branch'in öncelik verdiği hız hedefiyle çelişir) ve oran
+    # donanıma göre değişeceğinden güvenilir kalibre edilemiyor. O yüzden hız korunuyor;
+    # olası varyasyon zaten zararsız çünkü kayan_pencere_coz her pencerede MILP'i greedy'nin
+    # GERÇEK maliyetiyle açıkça kıyaslayıp kötüyse greedy'ye düşüyor (bkz. `kayan_pencere.py`
+    # `not_` alanı) — "greedy'den kötü olmama" ve kuruş kapısı garantisi buradan geliyor,
+    # CP-SAT'ın koşular arası aynı FEASIBLE noktayı bulmasından değil. Etki alanı dar: yalnız
+    # OPTIMAL ispatlanamayan pencerelerde, ve yalnız hangi (yine geçerli) planın seçildiğini
+    # değiştirir — hiçbir zaman kabul kriterlerini (greedy'den kötü olma, kuruş kapısı) ihlal
+    # etmez. `num_search_workers=1` + `random_seed` + `PYTHONHASHSEED=0` (main.py) OPTIMAL
+    # ispatlanan pencerelerde ve greedy'de tam determinizmi zaten sağlıyor.
+    #
+    # Determinizm (proje kuralı: teslim edilen dosyalar her koşuda bit düzeyinde
+    # aynı olmalı, config.SEED). CP-SAT varsayılan olarak sabit değil; paralel arama
+    # da (num_search_workers>1) çekirdek sayısına göre farklı sonuç bulabileceğinden
+    # tek işçiyle sabitleniyor. NOT: bunlar TEK BAŞINA yeterli değil — Python'ın string/
+    # set hash'i de (PYTHONHASHSEED) süreçler arası sabitlenmeli, bkz. main.py'nin giriş
+    # noktası koruması.
+    solver.parameters.random_seed = config.SEED
+    solver.parameters.num_search_workers = 1
+    # Sıfır gap'i (kanıtlanmış tam optimal) ıspatlamak genelde arama süresinin en
+    # pahalı kısmıdır — iyi bir çözümü hızlı bulur ama "daha iyisi yok" ispatına
+    # kalan bütçenin çoğunu harcar. %1 içindeki bir çözüm zaten greedy'den kat kat
+    # ucuz olduğu için (kayan_pencere.py kıyas+fallback'i ayrıca garanti ediyor)
+    # burada durmak güvenli ve çok daha hızlı.
+    solver.parameters.relative_gap_limit = config.MILP_GORECELI_GAP
     durum = solver.Solve(model)
     durum_adi = solver.StatusName(durum)
     print(f"milp_coz: {durum_adi} ({solver.WallTime():.1f} sn) — {solver.ResponseStats()}")

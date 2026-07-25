@@ -80,3 +80,71 @@ def test_sla_gecikme_yakalanir():
     assert len(farklar) == 1
     # 5000 desi × ceil(180dk) 3 saat × 0.4 = 6000 TL beklenen
     assert farklar[0]["sim_ceza"] == 6000.0
+
+
+# --- kesirli desi (int() kesme regresyonu, issue #21 geliştirmesinde bulundu) --------
+
+def test_maliyet_kesirli_desi_int_kesmesi_olmadan_dogru():
+    """'Taşınan Desi' tam sayı olmak zorunda değil (MILP'in ölçekli çözümü 0,01
+    hassasiyetinde kesirli değerler üretebilir). Önceden `int(...)` ile kesiliyordu
+    ve gerçek maliyetten sapan yanlış bir 'fark' üretiyordu — bu artık olmamalı.
+    """
+    k = _mock_kisitlar()
+    kesirli_desi = 4999.92
+    dogru_maliyet = arac_maliyeti_tl(487.5, 25, kullanim_suresi_dk(kesirli_desi, 2.98), 194)
+    plan = _plan(dogru_maliyet)
+    plan["Taşınan Desi"] = plan["Taşınan Desi"].astype(float)
+    plan.loc[0, "Taşınan Desi"] = kesirli_desi
+
+    assert _hesapla_maliyet(plan, k) == []
+
+
+# --- ara bacakta SLA hesaplanmaması (issue #21 geliştirmesinde bulundu) --------------
+
+def test_sla_sadece_nihai_varista_hesaplanir_ara_bacakta_degil():
+    """Konsolideli (çok bacaklı) bir teslimde ARA duraktaki bacağın 'Varış'ı
+    orijinal hedeften farklıdır. Eskiden her satır nihai teslim sanılıp o bacağın
+    KENDİ (kısa) rotasının sla_gun'uyla ceza hesaplanıyordu — ara bacak erken/geç
+    olsa da alakasız, uydurma büyük cezalar üretiyordu. Şimdi yalnız orijinal
+    varış TM'sine ulaşan satırda SLA değerlendirilmeli.
+    """
+    tir = AracTipi(
+        ad="Tır", kapasite_desi=22400,
+        kiralik_saatlik_tl=291.666667, kiralik_km_tl=13,
+        spot_saatlik_tl=487.5, spot_km_tl=25,
+    )
+    talep = pd.DataFrame([{
+        "talep_id": "D00001", "tarih": pd.Timestamp("2026-06-29"),
+        "cikis": "A", "varis": "C", "slot": "09:00", "toplam_desi": 5000,
+    }])
+    # A->B sla_gun=1 (kısa, ara bacağın KENDİ rotası) ama A->C (gerçek rota) sla_gun=3
+    sla_gunleri = {("A", "B"): 1, ("B", "C"): 1, ("A", "C"): 3}
+    kisitlar = SimpleNamespace(
+        arac_tipleri={"Tır": tir},
+        mesafe_km=lambda c, v: 194,
+        seyir_saat=lambda c, v, a: 2.98,
+        sla_gun=lambda c, v: sla_gunleri[(c, v)],
+        talep=talep,
+    )
+    df = pd.DataFrame([
+        {
+            "Araç ID": "V0001", "Araç Tipi": "Spot", "Araç türü": "Tır",
+            "Çıkış": "A", "Varış": "B",
+            "Çıkış Tarihi": "29.06.2026", "Çıkış Saati": "09:00",
+            "Varış Tarihi": "29.06.2026", "Varış Saati": "12:00",
+            "Talep ID": "D00001", "Taşınan Desi": 5000,
+            "Yolculuk süresi": 179, "Çıkış elleçleme süresi": 50,
+            "Varış elleçleme süresi": 50, "Toplam maliyet": 1000.0, "SLA cezası": 0.0,
+        },
+        {
+            "Araç ID": "V0001", "Araç Tipi": "Spot", "Araç türü": "Tır",
+            "Çıkış": "B", "Varış": "C",
+            "Çıkış Tarihi": "29.06.2026", "Çıkış Saati": "12:50",
+            "Varış Tarihi": "30.06.2026", "Varış Saati": "09:00",
+            "Talep ID": "D00001", "Taşınan Desi": 5000,
+            "Yolculuk süresi": 179, "Çıkış elleçleme süresi": 50,
+            "Varış elleçleme süresi": 50, "Toplam maliyet": 0.0, "SLA cezası": 0.0,
+        },
+    ])
+
+    assert _hesapla_sla(df, kisitlar) == []

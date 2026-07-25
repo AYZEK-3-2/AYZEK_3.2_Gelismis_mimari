@@ -41,3 +41,15 @@ SEED = 42
 MILP_ZAMAN_LIMIT_SN = 60.0     # kabul kriteri: 1 günlük dilim bu sürede fizibil çözüm
 MILP_DESI_OLCEK = 100          # CP-SAT tam sayı gerektirir; 0.01 desi hassasiyeti
 MILP_MAX_GECIKME_GUN = 3       # f[emtia,kenar] zaman penceresi filtresi (SLA <= 2 gün + tolerans)
+MILP_GORECELI_GAP = 0.01       # %1 içinde kanıtlanmış-yeterli kabul et — sıfır gap'i ıspatlamak
+                                # için harcanan (genelde en pahalı) son kısmı hızlandırır
+
+# Kayan pencere (mimari §5.4 "en büyük risk" azaltımı — issue #21)
+KAYAN_PENCERE_GUN = 3          # pencere genişliği (SLA <= 2 gün + 1 gün tolerans)
+KAYAN_PENCERE_ADIM_GUN = 1     # her adımda yalnız ilk gün commit edilir, pencere 1 gün ilerler
+# MILP_ZAMAN_LIMIT_SN (#20) TEK bir 1-günlük çözüm için kalibre edildi; kayan pencere
+# MILP'i pencere başına (5-7 kez) çağırdığı için aynı süreyi kullanmak toplam süreyi
+# kat kat şişirir. CP-SAT bu ölçekte küçük bir gap'e asla hızlı yakınsamıyor (gap
+# genelde %75+ kalıyor, süre sınırına her koşulda çarpıyor) — ama kısa bütçede bile
+# bulduğu çözüm greedy'den kat kat ucuz kalıyor (kıyas+fallback zaten garantisi).
+KAYAN_PENCERE_ZAMAN_LIMIT_SN = 3.0

@@ -35,8 +35,14 @@ def _spot_arac_tipi_sec(desi: float, kisitlar) -> str:
 
 
 def _maliyet(cikis: str, varis: str, arac_tipi: str, kiralik: bool,
-             cikis_ani: datetime, desi_int: int, kisitlar) -> float:
-    """Gerçek taşınan desi'den araç maliyeti hesapla (simülatörle birebir)."""
+             cikis_ani: datetime, desi_gercek: float, kisitlar) -> float:
+    """Gerçek taşınan desi'den araç maliyeti hesapla (simülatörle birebir).
+
+    int() KESMESİ YOK: katman3_simulator._hesapla_maliyet de "Taşınan Desi"yi
+    float olarak toplar (kesirli desi kesmenin kuruş kapısını kırdığı, daha önce
+    canlı testle bulunmuş bir bug — bkz. issue #21). Buradaki hesap onunla
+    "simülatörle birebir" olmalı, o yüzden aynı şekilde kesilmemiş float kullanır.
+    """
     servis = Servis(
         arac_tipi=arac_tipi,
         kiralik=kiralik,
@@ -45,7 +51,7 @@ def _maliyet(cikis: str, varis: str, arac_tipi: str, kiralik: bool,
     )
     return maliyet_hesapla(
         servis,
-        {cikis: desi_int, varis: desi_int},
+        {cikis: desi_gercek, varis: desi_gercek},
         kisitlar,
     ).arac_maliyeti_tl
 
@@ -223,8 +229,7 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
         if not talepler:
             continue  # boş araç (kiralık rotada sıfır talep) → plan'a yazılmaz
 
-        total_desi = sum(t.desi for t in talepler)
-        desi_int = int(total_desi)          # simülatörle aynı truncation
+        desi_gercek = sum(t.desi for t in talepler)  # int() kesmesi YOK, bkz. _maliyet
 
         cikis = sb["cikis"]
         varis = sb["varis"]
@@ -235,10 +240,10 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
         seyir_dk = math.ceil(
             kisitlar.seyir_saat(cikis, varis, arac_tipi) * 60
         )
-        ell_v_dk = math.ceil(desi_int * config.ELLECLEME_DK_PER_DESI)
+        ell_v_dk = math.ceil(desi_gercek * config.ELLECLEME_DK_PER_DESI)
         varis_ani = cikis_ani + timedelta(minutes=seyir_dk + ell_v_dk)
 
-        mal = _maliyet(cikis, varis, arac_tipi, kiralik, cikis_ani, desi_int, kisitlar)
+        mal = _maliyet(cikis, varis, arac_tipi, kiralik, cikis_ani, desi_gercek, kisitlar)
 
         bacak = BacakAtama(
             cikis=cikis,
@@ -271,14 +276,13 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
             t["tarih"] + timedelta(days=14)
         ).replace(hour=9, minute=0, second=0, microsecond=0).to_pydatetime()
 
-        desi_int = int(desi)
         seyir_dk = math.ceil(
             kisitlar.seyir_saat(cikis, varis, arac_tipi) * 60
         )
-        ell_v_dk = math.ceil(desi_int * config.ELLECLEME_DK_PER_DESI)
+        ell_v_dk = math.ceil(desi * config.ELLECLEME_DK_PER_DESI)
         late_varis = late_cikis + timedelta(minutes=seyir_dk + ell_v_dk)
 
-        mal = _maliyet(cikis, varis, arac_tipi, False, late_cikis, desi_int, kisitlar)
+        mal = _maliyet(cikis, varis, arac_tipi, False, late_cikis, desi, kisitlar)
 
         bacak = BacakAtama(
             cikis=cikis,

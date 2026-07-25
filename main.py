@@ -10,8 +10,10 @@ kapılar gecerse kopyalanir).
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -25,6 +27,27 @@ from katman1_tahmin import tahmin_uret, talep_id_ata, talep_tahmini_yaz
 from katman2_planlama import plan_uret
 from katman3_simulator import dogrula_ve_yaz
 from katman3_simulator.simulator import SimulasyonHatasi
+
+
+def _determinizm_icin_yeniden_baslat_gerekiyorsa() -> None:
+    """Determinizm (proje kuralı: teslim edilen dosyalar her koşuda bit düzeyinde aynı
+    olmalı, bkz. config.SEED). Python'ın string/set hash'i PYTHONHASHSEED'e göre HER
+    SÜREÇTE rastgele salınır (varsayılan); bu, `set`/`dict`-anahtarlı iç yapılar
+    üzerinden CP-SAT'a giden model kurulumunu (ve dolayısıyla MILP çözücüsünün süre
+    sınırına takıldığı — yani kanıtlanmış optimal olmayan — durumlarda bulduğu çözümü)
+    koşudan koşuya değiştirebiliyor; canlı testle ölçülüp doğrulandı (issue #21).
+    Hash seed yalnızca yorumlayıcı BAŞLARKEN sabitlenebildiği için, ayarlı değilse
+    süreç aynı ortam değişkeniyle kendini yeniden başlatır. `subprocess.run` (stdout/
+    stderr doğrudan miras alınır) kullanılıyor — `os.execv` Windows'ta süreç yer
+    değiştirmesini bazı terminal/boru hattı kurulumlarında güvenilir aktarmıyor.
+    `--seed` argümanı (`_seed_ayarla`) yalnız `random`/`numpy`'ı tohumlar; CP-SAT'ın
+    dolaylı olarak dayandığı Python hash tohumunu KAPSAMAZ, o yüzden bu koruma ayrıca
+    gerekli.
+    """
+    if os.environ.get("PYTHONHASHSEED") != "0":
+        env = dict(os.environ, PYTHONHASHSEED="0")
+        sonuc = subprocess.run([sys.executable] + sys.argv, env=env)
+        sys.exit(sonuc.returncode)
 
 
 def _seed_ayarla(seed: int) -> None:
@@ -106,4 +129,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    _determinizm_icin_yeniden_baslat_gerekiyorsa()
     main()
