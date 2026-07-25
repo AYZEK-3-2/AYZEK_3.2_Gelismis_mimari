@@ -33,7 +33,8 @@ def talep_id_ata(tahmin_df: pd.DataFrame) -> pd.DataFrame:
     kolonu içerir ve ID sırasına göre sıralanmıştır.
     """
     df = tahmin_df.sort_values(ID_SIRA, kind="stable").reset_index(drop=True)
-    df["talep_id"] = [config.TALEP_ID_SABLON.format(i + 1) for i in range(len(df))]
+    _ID_BAS = 70_001  # kisitlar.talep max 66024, güvenli boşluk
+    df["talep_id"] = [config.TALEP_ID_SABLON.format(_ID_BAS + i) for i in range(len(df))]
     return df
 
 
@@ -68,5 +69,6 @@ def talep_tahmini_yaz(tahmin_df: pd.DataFrame, dosya) -> pd.DataFrame:
         raise ValueError(f"Beklenmeyen slot değeri: {gecersiz}")
 
     cikti = cikti[list(SUTUNLAR)]
+    cikti = cikti[cikti["Tahmin Edilen Desi"] >= 1].reset_index(drop=True)
     cikti.to_excel(dosya, index=False)
     return cikti

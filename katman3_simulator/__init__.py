@@ -28,5 +28,5 @@ def dogrula_ve_yaz(veri, tahmin, plan):
     dogrula_muhasebe(plan_df)
     dogrula_talep_butunlugu(plan_df, tahmin)
 
-    print("katman3: tüm kapılar geçti ✓")
+    print("katman3: tum kapilar gecti [OK]")
     return sonuc

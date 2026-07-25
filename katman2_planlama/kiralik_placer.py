@@ -123,6 +123,20 @@ def kiralik_servisleri_yerlestir(
                         "kalan_desi": kalan,
                     })
 
+    # Kiralık olmayan rotaları kalan'a ekle (tir/spot karşılasın)
+    kiralik_rotalar = {(hat.cikis, hat.varis) for hat in kisitlar.kiralik_hatlar}
+    for _, row in tahmin_df.iterrows():
+        if (row["cikis"], row["varis"]) not in kiralik_rotalar:
+            desi = float(row.get("toplam_desi", 0.0))
+            if desi > 0:
+                kalan_satirlar.append({
+                    "cikis": row["cikis"],
+                    "varis": row["varis"],
+                    "tarih": pd.Timestamp(row["tarih"]).date(),
+                    "slot": str(row["slot"]),
+                    "kalan_desi": desi,
+                })
+
     kalan_talep_df = (
         pd.DataFrame(kalan_satirlar)
         if kalan_satirlar
