@@ -36,3 +36,8 @@ TAHMIN_SATIR_SAYISI = 4046
 
 # Determinizm: teslim edilen dosyalar her koşuda bit düzeyinde aynı olmalı
 SEED = 42
+
+# Katman 2 · Set-partitioning MILP (mimari §5.4)
+MILP_ZAMAN_LIMIT_SN = 60.0     # kabul kriteri: 1 günlük dilim bu sürede fizibil çözüm
+MILP_DESI_OLCEK = 100          # CP-SAT tam sayı gerektirir; 0.01 desi hassasiyeti
+MILP_MAX_GECIKME_GUN = 3       # f[emtia,kenar] zaman penceresi filtresi (SLA <= 2 gün + tolerans)
