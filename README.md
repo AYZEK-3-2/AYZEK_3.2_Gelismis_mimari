@@ -21,23 +21,57 @@ Taşıyıcı kurallar: servis birinci sınıf nesnedir; simülatör optimizatör
 
 `veri/` altında yarışma veri setleri (66.024 talep · 289 hat · 18 TM), `veri/sablon/` altında jüri çıktı şablonları, `veri/dokuman/` altında şartname ve soru-cevap PDF'leri.
 
-## Kurulum (Windows)
+## Kurulum
 
-```powershell
-py -3.12 -m venv .venv
+```bash
+python -m venv .venv
+# Windows:
 .venv\Scripts\activate
+# Linux/macOS:
+# source .venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
-Doğrulama: `pytest` (iskelet testleri yeşil olmalı).
+Kurulum doğrulaması:
+
+```bash
+pytest
+```
+
+Tüm testler yeşil geçmeli.
 
 ## Çalıştırma
 
-```powershell
+```bash
 python main.py
 ```
 
-Tek komut, iki teslim dosyası: `Tasima-plani.xlsx` ve `Talep-tahmini.xlsx` (deterministik, sabit seed). Akış iskeleti hazır; katmanlar issue'lar kapandıkça doluyor. Klasör düzeni:
+Tek komutla iki teslim dosyası üretilir: `cikti/Tasima-plani.xlsx` ve `cikti/Talep-tahmini.xlsx`.
+Kalite kapıları geçilmeden hiçbir dosya yazılmaz; hata durumunda sıfır olmayan exit code döner.
+
+Süre logu her koşuda stdout'a yazılır (tipik):
+
+```
+veri yukleme :    0.8 sn
+tahmin       :   19.8 sn
+planlama     :    6.8 sn
+dogrulama    :   97.5 sn
+TOPLAM       :  124.8 sn
+```
+
+Ek seçenekler:
+
+```bash
+python main.py --output-dir sonuclar/   # farkli cikti klasoru
+python main.py --seed 123               # farkli seed (varsayilan 42)
+python main.py --full                   # MILP+LNS (henuz hazir degil, greedy calisir)
+python main.py --milp-minutes 5         # MILP sure butcesi (--full ile)
+```
+
+Deterministik: aynı seed ile iki koşu bit düzeyinde aynı dosyaları üretir.
+
+Klasör düzeni:
 
 ```
 katman0_veri/       veri ve kısıt çekirdeği

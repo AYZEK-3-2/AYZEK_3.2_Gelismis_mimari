@@ -362,8 +362,8 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
     toplam_arac = df["Araç ID"].nunique()
     toplam_talep = df["Talep ID"].nunique()
 
-    print(f"Simülatör: {toplam_arac} araç, {toplam_talep} talep")
-    print("Doğrulama: GEÇTI")
+    print(f"Simulator: {toplam_arac} arac, {toplam_talep} talep")
+    print("Dogrulama: GECTI")
 
     return {
         "toplam_arac": toplam_arac,

@@ -35,6 +35,7 @@ class TalepAtama:
     desi: float
     son_bacak: bool   # bu bacak talebin teslim bacağı mı?
     sla_ceza: float   # son_bacak=True → hesaplanmış ceza, diğerleri 0.0
+    sla_bitis: "datetime | None" = None
 
 
 @dataclass
