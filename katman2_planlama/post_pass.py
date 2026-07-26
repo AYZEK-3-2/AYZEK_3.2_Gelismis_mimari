@@ -60,7 +60,8 @@ class Parca:
 
 
 def _ellecleme_dk(desi: float) -> int:
-    return math.ceil(desi * config.ELLECLEME_DK_PER_DESI)
+    # Tolerans: bkz. config.TAVAN_TOLERANSI_DK
+    return math.ceil(desi * config.ELLECLEME_DK_PER_DESI - config.TAVAN_TOLERANSI_DK)
 
 
 def _seyir_dk(seyir_saat: float) -> int:

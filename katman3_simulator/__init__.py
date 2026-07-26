@@ -10,7 +10,12 @@ import dataclasses
 import pandas as pd
 
 from .simulator import simulasyonu_calistir, plan_oku
-from .format_kapisi import dogrula_plan_formati, dogrula_muhasebe, dogrula_talep_butunlugu
+from .format_kapisi import (
+    dogrula_plan_formati,
+    dogrula_muhasebe,
+    dogrula_sablon_sutunlari,
+    dogrula_talep_butunlugu,
+)
 
 
 def _sla_dogrulamasi_icin_talep(tahmin: pd.DataFrame) -> pd.DataFrame:
@@ -49,7 +54,8 @@ def dogrula_ve_yaz(veri, tahmin, plan):
     veri_sim = dataclasses.replace(veri, talep=_sla_dogrulamasi_icin_talep(tahmin))
     sonuc = simulasyonu_calistir(plan_df, veri_sim)
 
-    # 3) Format kapısı kontrolleri
+    # 3) Format kapısı kontrolleri — İKİ dosya da şablonuyla birebir olmalı
+    dogrula_sablon_sutunlari(tahmin, "TALEP_TAHMINI_sablon.xlsx")
     dogrula_plan_formati(plan_df)
     dogrula_muhasebe(plan_df)
     dogrula_talep_butunlugu(plan_df, tahmin)

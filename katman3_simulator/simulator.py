@@ -12,16 +12,22 @@ from .hesaplamalar import (
 from .kapasite import KapasiteDefter
 
 
+# veri/sablon/TASIMA_PLANI_sablon.xlsx ile BİREBİR (bkz. plan_yazici.SABLON_SUTUNLARI).
+# §6 gereği katman2'den import edilmez, ikinci kez yazılır — ama kaynak aynı şablondur.
 PLAN_SUTUNLARI = [
     "Araç ID", "Araç Tipi", "Araç türü",
-    "Çıkış", "Varış",
+    "Çıkış Transfer Merkezi", "Varış Transfer Merkezi",
     "Çıkış Tarihi", "Çıkış Saati",
     "Varış Tarihi", "Varış Saati",
     "Talep ID", "Taşınan Desi",
     "Yolculuk süresi",
-    "Çıkış elleçleme süresi", "Varış elleçleme süresi",
-    "Toplam maliyet", "SLA cezası",
+    "Varış elleçleme süresi", "Çıkış Elleçleme süresi",
+    "SLA cezası", "Toplam maliyet",
 ]
+
+# Plan içinde TM sütunlarının adı — uzun oldukları için kısayol.
+CIKIS = "Çıkış Transfer Merkezi"
+VARIS = "Varış Transfer Merkezi"
 
 
 class SimulasyonHatasi(Exception):
@@ -97,14 +103,14 @@ def dogrula_rota_gecerliligi(df: pd.DataFrame) -> None:
 
         duraklar = []
         for _, satir in sirali.iterrows():
-            if satir["Çıkış"] not in duraklar:
-                duraklar.append(satir["Çıkış"])
-            if satir["Varış"] not in duraklar:
-                duraklar.append(satir["Varış"])
+            if satir[CIKIS] not in duraklar:
+                duraklar.append(satir[CIKIS])
+            if satir[VARIS] not in duraklar:
+                duraklar.append(satir[VARIS])
 
         for _, satir in sirali.iterrows():
-            talep_cikis = satir["Çıkış"]
-            talep_varis = satir["Varış"]
+            talep_cikis = satir[CIKIS]
+            talep_varis = satir[VARIS]
             cikis_idx = duraklar.index(talep_cikis)
             varis_idx = duraklar.index(talep_varis)
             if cikis_idx >= varis_idx:
@@ -121,8 +127,8 @@ def dogrula_kiralik(df: pd.DataFrame, kiralik_hatlar) -> None:
 
     for kiralik in kiralik_hatlar:
         eslesme = kiralik_satirlar[
-            (kiralik_satirlar["Çıkış"] == kiralik.cikis)
-            & (kiralik_satirlar["Varış"] == kiralik.varis)
+            (kiralik_satirlar[CIKIS] == kiralik.cikis)
+            & (kiralik_satirlar[VARIS] == kiralik.varis)
             & (kiralik_satirlar["Araç türü"] == kiralik.arac_turu)
         ]
         if eslesme.empty:
@@ -143,7 +149,7 @@ def dogrula_zaman_cakismasi(df: pd.DataFrame) -> None:
     """
     for arac_id, grup in df.groupby("Araç ID"):
         bacaklar = grup.drop_duplicates(
-            subset=["Çıkış", "Varış", "Çıkış Tarihi", "Çıkış Saati", "Varış Tarihi", "Varış Saati"]
+            subset=[CIKIS, VARIS, "Çıkış Tarihi", "Çıkış Saati", "Varış Tarihi", "Varış Saati"]
         )
         sirali = bacaklar.sort_values(["Çıkış Tarihi", "Çıkış Saati"])
         satirlar = list(sirali.iterrows())
@@ -164,6 +170,59 @@ def dogrula_zaman_cakismasi(df: pd.DataFrame) -> None:
                     f"{arac_id} zaman çakışması: "
                     f"varış {onceki_varis} > sonraki çıkış {sonraki_cikis}"
                 )
+
+
+def dogrula_dogus_ani(df: pd.DataFrame, kisitlar) -> None:
+    """Hiçbir araç, taşıdığı yük DOĞMADAN önce kalkmış olamaz.
+
+    Bir talep ancak kendi tamamlanma anında (09:00 / 17:00) var olur; o andan
+    önce kalkan bir araca yüklenmesi fiziksel olarak imkânsızdır. Bu kontrol
+    hiç yoktu ve hiçbir kapı yerini tutmuyordu: rota geçerliliği yalnız durak
+    SIRASINA, zaman çakışması yalnız aracın KENDİ bacakları arasındaki tutarlılığa,
+    SLA ise yalnız GEÇ teslime bakar — erken kalkış hepsinin altından geçiyordu.
+    Gerçek veride greedy planın %4,1'i (182 satır) bu ihlali taşıyordu, en uç
+    örnekte yük kalkıştan 5 gün 15 saat SONRA doğuyordu.
+
+    Bu, MVP'yi öldüren hata sınıfının (fiziksel olarak geçersiz plan satırı)
+    aynısıdır; §6 gereği optimizatörden bağımsız burada, çıktı dosyası üzerinden
+    doğrulanır.
+
+    Kontrol yalnız talebin KENDİ çıkış TM'sinden kalkan bacakta yapılır:
+    konsolidasyonlu bir yolculukta ara bacakların çıkışı talebin orijinal
+    çıkışından farklıdır ve o bacağa yük zaten önceki bacakla gelmiştir
+    (`_hesapla_sla`'nın nihai-varış filtresiyle aynı ilke).
+    """
+    talep_tablosu = kisitlar.talep
+    ihlaller = []
+
+    for _, satir in df.iterrows():
+        kok_id = str(satir["Talep ID"]).split("-")[0]
+        talep_satiri = talep_tablosu[talep_tablosu["talep_id"] == kok_id]
+        if talep_satiri.empty:
+            continue
+        talep_satiri = talep_satiri.iloc[0]
+
+        if satir[CIKIS] != talep_satiri["cikis"]:
+            continue
+
+        saat, dakika = map(int, str(talep_satiri["slot"]).split(":"))
+        dogus = pd.Timestamp(talep_satiri["tarih"]).to_pydatetime().replace(
+            hour=saat, minute=dakika, second=0, microsecond=0
+        )
+        kalkis = _tarihe_cevir(satir["Çıkış Tarihi"], satir["Çıkış Saati"])
+
+        if kalkis < dogus:
+            ihlaller.append(
+                f"  {satir['Araç ID']} / {satir['Talep ID']}: kalkis {kalkis} "
+                f"< dogus {dogus} ({satir[CIKIS]} -> {satir[VARIS]})"
+            )
+
+    if ihlaller:
+        gosterilen = "\n".join(ihlaller[:20])
+        fazla = f"\n  ... ve {len(ihlaller) - 20} satır daha" if len(ihlaller) > 20 else ""
+        raise SimulasyonHatasi(
+            f"Yük doğmadan kalkan araç ({len(ihlaller)} satır):\n{gosterilen}{fazla}"
+        )
 
 
 def _tir_dokunuslarini_isle(df: pd.DataFrame, kapasite: KapasiteDefter) -> None:
@@ -191,16 +250,16 @@ def _tir_dokunuslarini_isle(df: pd.DataFrame, kapasite: KapasiteDefter) -> None:
     servisi üretmediği için bu düzeltme mevcut (direkt) senaryoları etkilemez.
     """
     tir_bacaklari = df[df["Araç türü"] == "Tır"].drop_duplicates(
-        subset=["Araç ID", "Çıkış", "Varış", "Çıkış Tarihi", "Çıkış Saati",
+        subset=["Araç ID", CIKIS, VARIS, "Çıkış Tarihi", "Çıkış Saati",
                 "Varış Tarihi", "Varış Saati"]
     )
     for _, grup in tir_bacaklari.groupby("Araç ID"):
         sirali = grup.sort_values(["Çıkış Tarihi", "Çıkış Saati"])
         satirlar = [satir for _, satir in sirali.iterrows()]
         ilk = satirlar[0]
-        kapasite.tir_dokunusu_ekle(ilk["Çıkış"], _gun_str(ilk["Çıkış Tarihi"]))
+        kapasite.tir_dokunusu_ekle(ilk[CIKIS], _gun_str(ilk["Çıkış Tarihi"]))
         for satir in satirlar:
-            kapasite.tir_dokunusu_ekle(satir["Varış"], _gun_str(satir["Varış Tarihi"]))
+            kapasite.tir_dokunusu_ekle(satir[VARIS], _gun_str(satir["Varış Tarihi"]))
 
 
 def _hesapla_maliyet(df: pd.DataFrame, kisitlar) -> list:
@@ -223,7 +282,7 @@ def _hesapla_maliyet(df: pd.DataFrame, kisitlar) -> list:
         toplam_km = 0
 
         bacaklar = grup.groupby(
-            ["Çıkış", "Varış", "Çıkış Tarihi", "Çıkış Saati"]
+            [CIKIS, VARIS, "Çıkış Tarihi", "Çıkış Saati"]
         )
 
         for (cikis, varis, _, _), bacak_df in bacaklar:
@@ -274,7 +333,7 @@ def _hesapla_sla(df: pd.DataFrame, kisitlar) -> list:
         # hesaplarsak (yanlış bir ara-mesafe sla_gun'u ve erken bir ara-varış anıyla)
         # hatalı, çoğunlukla büyük bir ceza uydurulmuş olur. Ara bacaklarda SLA
         # cezası zaten hep 0'dır (§8.2 muhasebe kuralı) — burada da atlanır.
-        if satir["Varış"] != talep_satiri["varis"]:
+        if satir[VARIS] != talep_satiri["varis"]:
             continue
 
         # SLA hedef gün — talebin ORİJİNAL çıkış/varışına göre (bacağın kendi
@@ -323,6 +382,7 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
     dogrula_rota_gecerliligi(df)
     dogrula_kiralik(df, kisitlar.kiralik_hatlar)
     dogrula_zaman_cakismasi(df)
+    dogrula_dogus_ani(df, kisitlar)
 
     # Kapasite kontrolü
     kapasite = KapasiteDefter(
@@ -334,8 +394,8 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
         cikis_gun = _gun_str(satir["Çıkış Tarihi"])
         varis_gun = _gun_str(satir["Varış Tarihi"])
         desi = float(satir["Taşınan Desi"])  # int() değil — bkz. _hesapla_maliyet notu
-        cikis_tm = satir["Çıkış"]
-        varis_tm = satir["Varış"]
+        cikis_tm = satir[CIKIS]
+        varis_tm = satir[VARIS]
 
         # Çıkış elleçlemesi çıkış gününe
         kapasite.ellecleme_ekle(cikis_tm, cikis_gun, desi)

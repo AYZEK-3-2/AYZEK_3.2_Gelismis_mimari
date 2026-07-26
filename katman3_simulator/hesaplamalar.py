@@ -1,9 +1,16 @@
 import math
 
+import config
 
-def ellecleme_suresi_dk(desi: int) -> int:
-    """Elleçleme süresi: tavan(desi × 0.01) dakika."""
-    return math.ceil(desi * 0.01)
+
+def ellecleme_suresi_dk(desi: float) -> int:
+    """Elleçleme süresi: tavan(desi × 0.01) dakika.
+
+    `config.TAVAN_TOLERANSI_DK` kadarlık float gürültüsü tavana yuvarlanmaz
+    (bkz. config'deki gerekçe) — aksi halde optimizatörle bu modül aynı yükü
+    farklı sırada topladığında süre 1 dakika ayrışıp kuruş kapısını kırıyor.
+    """
+    return math.ceil(desi * 0.01 - config.TAVAN_TOLERANSI_DK)
 
 
 def seyir_suresi_dk(saat: float) -> int:

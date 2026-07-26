@@ -80,7 +80,9 @@ def _seyir_dk(seyir_saat: float) -> int:
 
 
 def _ellecleme_dk(yuk_desi: float) -> int:
-    return math.ceil(yuk_desi * config.ELLECLEME_DK_PER_DESI)
+    # Tolerans: bkz. config.TAVAN_TOLERANSI_DK — yük artık birden fazla talep
+    # diliminin toplamı olduğu için float gürültüsü taşıyabiliyor.
+    return math.ceil(yuk_desi * config.ELLECLEME_DK_PER_DESI - config.TAVAN_TOLERANSI_DK)
 
 
 def _gecikme_saat_tavan(gecikme_dk: float) -> int:

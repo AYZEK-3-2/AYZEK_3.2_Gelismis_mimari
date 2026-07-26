@@ -5,6 +5,7 @@ from katman3_simulator.simulator import (
     dogrula_arac_tutarliligi,
     dogrula_rota_gecerliligi,
     dogrula_zaman_cakismasi,
+    dogrula_dogus_ani,
     _tir_dokunuslarini_isle,
     SimulasyonHatasi,
 )
@@ -16,8 +17,8 @@ def sahte_plan(**degisiklikler):
         "Araç ID": ["V0001", "V0001"],
         "Araç Tipi": ["Spot", "Spot"],
         "Araç türü": ["Tır", "Tır"],
-        "Çıkış": ["İstanbul", "İstanbul"],
-        "Varış": ["Yalova", "Yalova"],
+        "Çıkış Transfer Merkezi": ["İstanbul", "İstanbul"],
+        "Varış Transfer Merkezi": ["Yalova", "Yalova"],
         "Çıkış Tarihi": ["29.06.2026", "29.06.2026"],
         "Çıkış Saati": ["09:00", "09:00"],
         "Varış Tarihi": ["29.06.2026", "29.06.2026"],
@@ -25,7 +26,7 @@ def sahte_plan(**degisiklikler):
         "Talep ID": ["D00001", "D00002"],
         "Taşınan Desi": [5000, 3000],
         "Yolculuk süresi": [56, 56],
-        "Çıkış elleçleme süresi": [80, 80],
+        "Çıkış Elleçleme süresi": [80, 80],
         "Varış elleçleme süresi": [80, 80],
         "Toplam maliyet": [5000.0, 0.0],
         "SLA cezası": [0.0, 0.0],
@@ -68,8 +69,8 @@ def test_hayalet_rota_reddedilir():
         "Araç ID": ["V0001", "V0001", "V0001"],
         "Araç Tipi": ["Spot", "Spot", "Spot"],
         "Araç türü": ["Tır", "Tır", "Tır"],
-        "Çıkış": ["İstanbul", "Eskişehir", "Yalova"],
-        "Varış": ["Yalova", "Yalova", "Eskişehir"],
+        "Çıkış Transfer Merkezi": ["İstanbul", "Eskişehir", "Yalova"],
+        "Varış Transfer Merkezi": ["Yalova", "Yalova", "Eskişehir"],
         "Çıkış Tarihi": ["29.06.2026", "29.06.2026", "29.06.2026"],
         "Çıkış Saati": ["09:00", "09:00", "11:00"],
         "Varış Tarihi": ["29.06.2026", "29.06.2026", "29.06.2026"],
@@ -77,7 +78,7 @@ def test_hayalet_rota_reddedilir():
         "Talep ID": ["D00001", "D00002", "D00003"],
         "Taşınan Desi": [5000, 3000, 2000],
         "Yolculuk süresi": [56, 56, 56],
-        "Çıkış elleçleme süresi": [80, 80, 80],
+        "Çıkış Elleçleme süresi": [80, 80, 80],
         "Varış elleçleme süresi": [80, 80, 80],
         "Toplam maliyet": [5000.0, 0.0, 0.0],
         "SLA cezası": [0.0, 0.0, 0.0],
@@ -94,8 +95,8 @@ def test_ters_rota_reddedilir():
         "Araç ID": ["V0001", "V0001"],
         "Araç Tipi": ["Spot", "Spot"],
         "Araç türü": ["Tır", "Tır"],
-        "Çıkış": ["İstanbul", "Yalova"],
-        "Varış": ["Yalova", "İstanbul"],
+        "Çıkış Transfer Merkezi": ["İstanbul", "Yalova"],
+        "Varış Transfer Merkezi": ["Yalova", "İstanbul"],
         "Çıkış Tarihi": ["29.06.2026", "29.06.2026"],
         "Çıkış Saati": ["09:00", "11:00"],
         "Varış Tarihi": ["29.06.2026", "29.06.2026"],
@@ -103,7 +104,7 @@ def test_ters_rota_reddedilir():
         "Talep ID": ["D00001", "D00002"],
         "Taşınan Desi": [5000, 3000],
         "Yolculuk süresi": [56, 56],
-        "Çıkış elleçleme süresi": [80, 80],
+        "Çıkış Elleçleme süresi": [80, 80],
         "Varış elleçleme süresi": [80, 80],
         "Toplam maliyet": [5000.0, 0.0],
         "SLA cezası": [0.0, 0.0],
@@ -122,8 +123,8 @@ def test_zaman_cakismasi_yok():
         "Araç ID": ["V0001", "V0001"],
         "Araç Tipi": ["Spot", "Spot"],
         "Araç türü": ["Tır", "Tır"],
-        "Çıkış": ["İstanbul", "Yalova"],
-        "Varış": ["Yalova", "Eskişehir"],
+        "Çıkış Transfer Merkezi": ["İstanbul", "Yalova"],
+        "Varış Transfer Merkezi": ["Yalova", "Eskişehir"],
         "Çıkış Tarihi": ["29.06.2026", "29.06.2026"],
         "Çıkış Saati": ["09:00", "11:00"],
         "Varış Tarihi": ["29.06.2026", "29.06.2026"],
@@ -131,7 +132,7 @@ def test_zaman_cakismasi_yok():
         "Talep ID": ["D00001", "D00002"],
         "Taşınan Desi": [5000, 3000],
         "Yolculuk süresi": [56, 56],
-        "Çıkış elleçleme süresi": [80, 80],
+        "Çıkış Elleçleme süresi": [80, 80],
         "Varış elleçleme süresi": [80, 80],
         "Toplam maliyet": [5000.0, 0.0],
         "SLA cezası": [0.0, 0.0],
@@ -145,8 +146,8 @@ def test_zaman_cakismasi_hata():
         "Araç ID": ["V0001", "V0001"],
         "Araç Tipi": ["Spot", "Spot"],
         "Araç türü": ["Tır", "Tır"],
-        "Çıkış": ["İstanbul", "Yalova"],
-        "Varış": ["Yalova", "Eskişehir"],
+        "Çıkış Transfer Merkezi": ["İstanbul", "Yalova"],
+        "Varış Transfer Merkezi": ["Yalova", "Eskişehir"],
         "Çıkış Tarihi": ["29.06.2026", "29.06.2026"],
         "Çıkış Saati": ["09:00", "10:00"],
         "Varış Tarihi": ["29.06.2026", "29.06.2026"],
@@ -154,7 +155,7 @@ def test_zaman_cakismasi_hata():
         "Talep ID": ["D00001", "D00002"],
         "Taşınan Desi": [5000, 3000],
         "Yolculuk süresi": [56, 56],
-        "Çıkış elleçleme süresi": [80, 80],
+        "Çıkış Elleçleme süresi": [80, 80],
         "Varış elleçleme süresi": [80, 80],
         "Toplam maliyet": [5000.0, 0.0],
         "SLA cezası": [0.0, 0.0],
@@ -168,7 +169,7 @@ def test_zaman_cakismasi_hata():
 def _tir_bacak(arac_id, cikis, varis, cikis_tarih, cikis_saat, varis_tarih, varis_saat):
     return {
         "Araç ID": arac_id, "Araç türü": "Tır",
-        "Çıkış": cikis, "Varış": varis,
+        "Çıkış Transfer Merkezi": cikis, "Varış Transfer Merkezi": varis,
         "Çıkış Tarihi": cikis_tarih, "Çıkış Saati": cikis_saat,
         "Varış Tarihi": varis_tarih, "Varış Saati": varis_saat,
     }
@@ -223,3 +224,46 @@ def test_iki_bagimsiz_direkt_sefer_ara_tmde_iki_dokunus_sayar():
 
     assert kapasite.tir_kullanim[("Yalova", "29.06.2026")] == 2
     assert sum(kapasite.tir_kullanim.values()) == 4
+
+# --- Doğuş anı kapısı (yük doğmadan araç kalkamaz) ---
+
+def _dogus_kisitlari(tarih="29.06.2026", slot="09:00"):
+    """`dogrula_dogus_ani` yalnız `kisitlar.talep`i kullanır — minimal sahte nesne."""
+    class _K:
+        talep = pd.DataFrame([{
+            "talep_id": "D00001", "cikis": "İstanbul", "varis": "Yalova",
+            "tarih": pd.Timestamp("2026-06-29"), "slot": slot,
+        }, {
+            "talep_id": "D00002", "cikis": "İstanbul", "varis": "Yalova",
+            "tarih": pd.Timestamp("2026-07-04"), "slot": "17:00",
+        }])
+    return _K()
+
+
+def test_dogus_ani_zamaninda_kalkis_gecer():
+    """Yük 09:00'da doğuyor, araç 09:20'de kalkıyor — geçerli."""
+    df = sahte_plan(**{"Çıkış Saati": ["09:20", "09:20"],
+                       "Talep ID": ["D00001", "D00001"]})
+    dogrula_dogus_ani(df, _dogus_kisitlari())
+
+
+def test_dogus_ani_erken_kalkis_reddedilir():
+    """Regresyon (gerçek veride 182 satır): araç, taşıdığı yük DOĞMADAN kalkmış.
+
+    D00002 04.07 17:00'da doğuyor ama araç 29.06 09:00'da kalkıyor —
+    fiziksel olarak imkânsız. Rota/çakışma/SLA kapılarının hiçbiri bunu
+    görmüyordu (SLA yalnız GEÇ teslimi cezalandırır).
+    """
+    df = sahte_plan(**{"Talep ID": ["D00001", "D00002"]})
+    with pytest.raises(SimulasyonHatasi, match="Yük doğmadan kalkan araç"):
+        dogrula_dogus_ani(df, _dogus_kisitlari())
+
+
+def test_dogus_ani_ara_bacak_atlanir():
+    """Konsolidasyonda ara bacağın çıkışı talebin orijinal çıkışından farklıdır;
+    yük oraya zaten önceki bacakla gelmiştir — o bacak kontrole girmemeli."""
+    df = sahte_plan(**{
+        "Çıkış Transfer Merkezi": ["Eskişehir", "Eskişehir"],   # talebin çıkışı İstanbul, bu ara bacak
+        "Talep ID": ["D00002", "D00002"],
+    })
+    dogrula_dogus_ani(df, _dogus_kisitlari())

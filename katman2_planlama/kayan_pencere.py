@@ -394,7 +394,14 @@ def _commit_ayir(
         ilk_arac_idx = parca.adimlar[0][0]
         gun = servisler[ilk_arac_idx].cikis_ani.date()
         if son_gun_dahil is not None:
-            return ilk_gun <= gun <= son_gun_dahil
+            # SON pencere: ÜST SINIR YOK. `spot_placer` elleçleme kapasitesi
+            # taşınca bir servisi ufkun (05.07) ötesine erteleyebiliyor (§15,
+            # en fazla 14 gün); üst sınır uygulanırsa o servisler hiçbir
+            # pencerede commit edilemez ve taşıdıkları yük SESSİZCE DÜŞER.
+            # Gerçek veride canlı olarak yakalandı: 16.211 desi / 92 talep.
+            # Geç kalkan araç plana yazılır ve SLA cezasını öder — `plan_uret`in
+            # geç-tarihli yedek araç davranışıyla aynı ilke; yük kaybolmaz.
+            return ilk_gun <= gun
         return gun == ilk_gun
 
     for parca in parcalar:
@@ -545,6 +552,18 @@ def kayan_pencere_coz(
         milp_sonuc = milp_coz(
             kisitlar, pencere_adaylari, emtialar, eslesme_tablosu, kenarlar,
             zaman_limit_sn=pencere_zaman_limit_sn, warm_start=ipucu,
+            # Pencere sonunda devredebilme izni: bu olmadan model pik günde
+            # KANITLANMIŞ ÇÖZÜMSÜZ (bkz. milp_cozucu `devir` notu). Devreden desi
+            # `kalan_desi` defterinde bir sonraki pencerede yeniden görünür.
+            #
+            # SON pencerede devir YASAK: devredecek bir sonraki pencere yok, park
+            # eden yük sessizce kaybolur (canlı testte yakalandı — 10.000 desinin
+            # 2.000'i teslim edilmeden düşüyordu). Son pencerede sert eşitlik geri
+            # gelir; model çözemezse zaten greedy'ye düşülür ve greedy §9 gereği
+            # hiçbir yükü dışarıda bırakmaz.
+            karsilanmayan_ceza_tl_per_desi=(
+                None if son_pencere else config.MILP_DEVIR_CEZA_TL_PER_DESI
+            ),
         )
 
         milp_maliyet = None
@@ -598,6 +617,18 @@ def kayan_pencere_coz(
 
         ilk_gun += timedelta(days=adim_gun)
         pencere_no += 1
+
+    # Güvenlik ağı: hiçbir desi yolda kaybolmamalı (§9 "hiçbir yük dışarıda
+    # kalmaz"). MILP tarafına eklenen `devir` mekanizması bunu sessizce
+    # bozabilecek tek yol olduğu için burada açıkça doğrulanıyor — canlı testte
+    # son penceredeki devir tam olarak bu şekilde yük düşürmüştü.
+    kalan_toplam = sum(d for d in kalan_desi.values() if d > 1e-6)
+    if kalan_toplam > 1e-6:
+        raise ValueError(
+            f"kayan_pencere_coz: {kalan_toplam:,.2f} desi hiçbir pencerede commit "
+            f"edilmedi ({sum(1 for d in kalan_desi.values() if d > 1e-6)} talep). "
+            f"Plan eksik olurdu."
+        )
 
     pencere_raporu = pd.DataFrame(pencere_satirlari)
     return KayanPencereSonucu(

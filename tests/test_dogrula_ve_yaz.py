@@ -54,14 +54,17 @@ def _tahmin_df():
 def _plan_df(sla_ceza):
     return pd.DataFrame([{
         "Araç ID": "V0001", "Araç Tipi": "Spot", "Araç türü": "Tır",
-        "Çıkış": "A", "Varış": "B",
+        "Çıkış Transfer Merkezi": "A", "Varış Transfer Merkezi": "B",
         "Çıkış Tarihi": "29.06.2026", "Çıkış Saati": "09:00",
         "Varış Tarihi": "29.06.2026", "Varış Saati": "12:00",
         "Talep ID": "D70001", "Taşınan Desi": 5000.0,
-        "Yolculuk süresi": 120, "Çıkış elleçleme süresi": 50,
+        # SIRA şablonla birebir (§8.1): Varış elleçleme -> Çıkış Elleçleme ->
+        # SLA cezası -> Toplam maliyet
+        "Yolculuk süresi": 120,
         "Varış elleçleme süresi": 50,
-        "Toplam maliyet": 100.0 * (50 + 120 + 50) / 60 + 2.0 * 100,
+        "Çıkış Elleçleme süresi": 50,
         "SLA cezası": sla_ceza,
+        "Toplam maliyet": 100.0 * (50 + 120 + 50) / 60 + 2.0 * 100,
     }])
 
 

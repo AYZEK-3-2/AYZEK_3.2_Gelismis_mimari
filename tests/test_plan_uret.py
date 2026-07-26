@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 
 from katman0_veri.kisitlar import AracTipi
-from katman2_planlama import plan_uret
+from katman2_planlama import _talepleri_ata, plan_uret
 from katman3_simulator.simulator import plan_oku, simulasyonu_calistir
 
 
@@ -92,3 +92,119 @@ def test_plan_uret_zamaninda_teslimde_sla_cezasi_sifir(tmp_path):
     plan_df = plan_oku(dosya)
 
     assert plan_df["SLA cezası"].sum() == pytest.approx(0.0)
+
+
+def _cok_gunluk_tahmin(gun_sayisi: int, desi: float, ilk_id: int = 70_010):
+    """Aynı hatta `gun_sayisi` gün boyunca her iki slotta talep üretir."""
+    satirlar = []
+    for g in range(gun_sayisi):
+        for i, slot in enumerate(("09:00", "17:00")):
+            satirlar.append({
+                "talep_id": f"D{ilk_id + 2 * g + i:05d}",
+                "tarih": pd.Timestamp("2026-06-29") + pd.Timedelta(days=g),
+                "cikis": "A", "varis": "B", "slot": slot, "tahmin_desi": desi,
+            })
+    return pd.DataFrame(satirlar)
+
+
+def _arac(cikis_ani: str, yuk_desi: float = 10_000.0) -> dict:
+    return {
+        "cikis": "A", "varis": "B", "arac_tipi": "Kamyon", "kiralik": False,
+        "cikis_ani": pd.Timestamp(cikis_ani).to_pydatetime(), "yuk_desi": yuk_desi,
+    }
+
+
+def test_talepleri_ata_arac_sirasi_talep_sirasiyla_ortusmese_de_dogus_korunur():
+    """Regresyon (gerçek veride 182 satır / 671.231 desi).
+
+    `servis_bilgileri` ZAMAN SIRALI DEĞİLDİR — kiralık (7 günün tamamı), sonra
+    tır, sonra spot araçlar arka arkaya eklenir, yani listenin ilerisinde daha
+    ERKEN kalkan araçlar bulunur. Eski kod talep kuyruğunu bu listeyle olduğu
+    gibi eşleştirdiği için, listede geç görünen erken araç kuyruğun ilerideki
+    (henüz doğmamış) talebini alıyordu.
+
+    Burada araçlar bilerek ters sırada veriliyor: önce 3 Temmuz aracı, sonra
+    29 Haziran aracı. Eski kod 29 Haziran aracına 3 Temmuz yükünü bağlar.
+    """
+    kisitlar = SimpleKisitlar({("A", "B"): 100})
+    tahmin = pd.DataFrame([
+        {"talep_id": "D70020", "tarih": pd.Timestamp("2026-06-29"),
+         "cikis": "A", "varis": "B", "slot": "09:00", "tahmin_desi": 1000.0},
+        {"talep_id": "D70021", "tarih": pd.Timestamp("2026-07-03"),
+         "cikis": "A", "varis": "B", "slot": "09:00", "tahmin_desi": 1000.0},
+    ])
+    servis_bilgileri = [_arac("2026-07-03 09:30"), _arac("2026-06-29 09:30")]
+
+    atamalar, _ = _talepleri_ata(servis_bilgileri, tahmin, kisitlar)
+
+    for sb, talepler in atamalar:
+        for t in talepler:
+            dogus = tahmin.loc[tahmin["talep_id"] == t.talep_id, "tarih"].iloc[0]
+            dogus = pd.Timestamp(dogus) + pd.Timedelta(hours=9)
+            assert sb["cikis_ani"] >= dogus, (
+                f"{t.talep_id} yükü doğmadan ({dogus}) araç kalkmış "
+                f"({sb['cikis_ani']})"
+            )
+
+
+def test_talepleri_ata_bir_arac_birden_fazla_talep_tasir():
+    """Regresyon (gerçek veride 608 talep / 1,32M desi sığmıyordu): araç başına
+    TEK talep kısıtı, aracın kalan kapasitesini çöpe atıyordu.
+
+    Kapasitesi 10.000 olan TEK araç, 17:00'da kalkıyor; ikisi de o ana kadar
+    doğmuş 1.000'er desilik iki talebi birlikte taşımalı ve hiçbiri dışarıda
+    kalmamalı. Eski davranışta araç yalnız ilkini alır, ikincisi `atanmamis`
+    olarak +14 gün ötelenirdi."""
+    kisitlar = SimpleKisitlar({("A", "B"): 100})
+    tahmin = _cok_gunluk_tahmin(gun_sayisi=1, desi=1000.0)   # 09:00 + 17:00
+    servis_bilgileri = [_arac("2026-06-29 17:30")]
+
+    atamalar, atanmamis = _talepleri_ata(servis_bilgileri, tahmin, kisitlar)
+
+    assert atanmamis == []
+    (_, talepler), = atamalar
+    assert len(talepler) == 2, f"araç yalnız {len(talepler)} talep aldı"
+    assert sum(t.desi for t in talepler) == pytest.approx(2000.0)
+
+
+def test_talepleri_ata_dogmamis_yuku_arac_almaz():
+    """Kural 1'in birim testi: 09:30'da kalkan araç, 17:00'da doğacak TEK
+    talebi ALAMAZ — o talep atanmamış kalmalı. Eski kod doğuş anına hiç
+    bakmadığı için yükü bu araca bağlıyordu."""
+    kisitlar = SimpleKisitlar({("A", "B"): 100})
+    tahmin = pd.DataFrame([{
+        "talep_id": "D70030", "tarih": pd.Timestamp("2026-06-29"),
+        "cikis": "A", "varis": "B", "slot": "17:00", "tahmin_desi": 1000.0,
+    }])
+    servis_bilgileri = [_arac("2026-06-29 09:30")]
+
+    atamalar, atanmamis = _talepleri_ata(servis_bilgileri, tahmin, kisitlar)
+
+    (_, talepler), = atamalar
+    assert talepler == [], "17:00 yükü 09:30'da kalkan araca binmemeli"
+    assert [t["talep_id"] for t in atanmamis] == ["D70030"]
+
+
+def test_ellecleme_tavani_float_gurultusunu_yutar():
+    """Regresyon (gerçek veride canlı olarak kuruş kapısını kırdı).
+
+    Araç yükü artık birden fazla talep diliminin toplamı; ardışık toplama
+    float64'te son bit'te sapma bırakıyor (12000.0 yerine 12000.000000000002).
+    Ham `ceil` bunu gerçek kesir sanıp süreyi 1 dakika şişiriyor ve katman2 ile
+    katman3 toplamı FARKLI sırada yaptığı için kuruş kapısı araç başına tam bir
+    dakikalık kirayla (±6,60 / ±10,61 TL) kırılıyordu.
+
+    İki taraf da §6 gereği ayrı ayrı yazılmış; ikisinin de aynı sonucu vermesi
+    testin asıl konusu.
+    """
+    from katman2_planlama.servis import _ellecleme_dk as katman2_ell
+    from katman2_planlama.post_pass import _ellecleme_dk as post_pass_ell
+    from katman3_simulator.hesaplamalar import ellecleme_suresi_dk as katman3_ell
+
+    gurultulu = 12_000.000000000002   # gerçek toplamada gözlenen sapma
+    for hesap in (katman2_ell, post_pass_ell, katman3_ell):
+        assert hesap(gurultulu) == 120, f"{hesap.__module__}: gürültü tavanı devirdi"
+        assert hesap(12_000.0) == 120
+        # gerçek kesir hâlâ yukarı yuvarlanmalı — tolerans onu yutmamalı
+        assert hesap(12_000.5) == 121
+        assert hesap(0.0) == 0
