@@ -64,16 +64,53 @@ def test_muhasebe_cift_maliyet():
         dogrula_muhasebe(df)
 
 
+def test_muhasebe_sifir_sla_cezasi_sorun_degil():
+    """Zamanında teslimde SLA cezası her satırda 0 olabilir — bu normaldir,
+    hata değildir (docstring'te vaat edilen ama koda hiç yazılmamış SLA
+    cezası kontrolü issue #22 canlı testinde eklendi)."""
+    df = sahte_plan()
+    dogrula_muhasebe(df)  # her iki satırda da SLA cezası 0.0 — hata yok
+
+
+def test_muhasebe_cift_sla_cezasi():
+    df = sahte_plan()
+    df.loc[0, "Talep ID"] = "D00003"
+    df2 = pd.concat([df, df.iloc[[0]]], ignore_index=True)  # aynı Talep ID iki satırda
+    df2.loc[0, "SLA cezası"] = 100.0
+    df2.loc[2, "Toplam maliyet"] = 0.0  # tekrarlanan satır maliyet invariantını bozmasın
+    df2.loc[2, "SLA cezası"] = 50.0
+    with pytest.raises(SimulasyonHatasi, match="SLA cezası birden fazla satırda"):
+        dogrula_muhasebe(df2)
+
+
 # --- Talep bütünlüğü ---
 
 def test_talep_butunlugu_dogru():
     plan = sahte_plan()
-    tahmin = pd.DataFrame({"Talep ID": ["D00001", "D00002"]})
+    tahmin = pd.DataFrame({
+        "Talep ID": ["D00001", "D00002"],
+        "Tahmin Edilen Desi": [5000.0, 3000.0],
+    })
     dogrula_talep_butunlugu(plan, tahmin)  # hata yok
 
 
 def test_talep_butunlugu_eksik():
     plan = sahte_plan()
-    tahmin = pd.DataFrame({"Talep ID": ["D00001", "D00002", "D00003"]})
+    tahmin = pd.DataFrame({
+        "Talep ID": ["D00001", "D00002", "D00003"],
+        "Tahmin Edilen Desi": [5000.0, 3000.0, 100.0],
+    })
     with pytest.raises(SimulasyonHatasi, match="planda eksik"):
         dogrula_talep_butunlugu(plan, tahmin)
+
+
+def test_talep_butunlugu_sifir_desi_planda_olmasa_da_gecer():
+    """0 desi öngörülen bir talep — taşınacak fiziksel bir şey yok, planda
+    hiç yer almaması DOĞRU (issue #22 canlı testinde bulunan gerçek veri
+    senaryosu: 632 talep tam olarak 0 tahminliydi)."""
+    plan = sahte_plan()
+    tahmin = pd.DataFrame({
+        "Talep ID": ["D00001", "D00002", "D00003"],
+        "Tahmin Edilen Desi": [5000.0, 3000.0, 0.0],
+    })
+    dogrula_talep_butunlugu(plan, tahmin)  # hata yok

@@ -166,6 +166,43 @@ def dogrula_zaman_cakismasi(df: pd.DataFrame) -> None:
                 )
 
 
+def _tir_dokunuslarini_isle(df: pd.DataFrame, kapasite: KapasiteDefter) -> None:
+    """Tır (TM, gün) dokunuşlarını `kapasite`ye işler.
+
+    BACAK bazında (Araç ID + Çıkış + Varış + Çıkış Tarihi/Saati), satır bazında
+    DEĞİL: bir bacakta birden fazla Talep ID satırı olabilir (konsolidasyon), ama
+    araç o TM'ye yalnız BİR KEZ dokunur. Satır bazında sayarsak aynı dokunuş, o
+    bacaktaki talep sayısı kadar çoğaltılmış olur.
+
+    ARA DURAK (zincirleme, §4.1/issue #22): bir aracın rotası birden fazla bacak
+    içeriyorsa (ör. A-B-C, iki bacak), önceki bacağın VARIŞ'ı ile sonraki bacağın
+    ÇIKIŞ'ı aynı fiziksel durma olayıdır (araç B'de hareket etmeden boşaltılıp
+    yeniden yüklenir) — jüri kuralı bunu 2 değil 1 dokunuş sayar (§3: "'Aynı araç
+    = 1 slot' kuralı yalnızca araç hareket etmeden boşaltılıp tekrar yüklenirse
+    geçerli"). `Servis.duraklar` yapısal olarak tekrarsız olduğu için (bkz.
+    katman2_planlama.servis.Servis.__post_init__) bir aracın rotası n bacaksa tam
+    olarak n+1 FARKLI durak ziyaret eder — dokunuş sayısı da bu olmalı, bacak uç
+    noktalarının (2n) toplamı değil. Bu yüzden aracın İLK bacağının çıkışını bir
+    kez, sonra sıradaki HER bacağın varışını bir kez sayıyoruz (n+1 dokunuş).
+    Direkt (tek bacaklı) seferlerde bu, önceki (bacak başına 2 dokunuş) davranışla
+    birebir aynı sonucu verir — yalnızca çok bacaklı (zincirleme) rotalarda ara
+    duraktaki double-count'u düzeltir. Bugüne kadar hiçbir servis üreticisi
+    (kiralik_placer/tir_slot_tahsis/servis_havuzu) 2 duraklı olmayan bir Tır
+    servisi üretmediği için bu düzeltme mevcut (direkt) senaryoları etkilemez.
+    """
+    tir_bacaklari = df[df["Araç türü"] == "Tır"].drop_duplicates(
+        subset=["Araç ID", "Çıkış", "Varış", "Çıkış Tarihi", "Çıkış Saati",
+                "Varış Tarihi", "Varış Saati"]
+    )
+    for _, grup in tir_bacaklari.groupby("Araç ID"):
+        sirali = grup.sort_values(["Çıkış Tarihi", "Çıkış Saati"])
+        satirlar = [satir for _, satir in sirali.iterrows()]
+        ilk = satirlar[0]
+        kapasite.tir_dokunusu_ekle(ilk["Çıkış"], _gun_str(ilk["Çıkış Tarihi"]))
+        for satir in satirlar:
+            kapasite.tir_dokunusu_ekle(satir["Varış"], _gun_str(satir["Varış Tarihi"]))
+
+
 def _hesapla_maliyet(df: pd.DataFrame, kisitlar) -> list:
     """Her araç için maliyeti bacak bazında bağımsız hesapla."""
     farklar = []
@@ -321,17 +358,7 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
         else:
             kapasite.ellecleme_ekle(varis_tm, varis_gun, desi)
 
-    # Tır dokunuşu — BACAK bazında (Araç ID + Çıkış + Varış + Çıkış Tarihi/Saati),
-    # satır bazında DEĞİL: bir bacakta birden fazla Talep ID satırı olabilir
-    # (konsolidasyon), ama araç o TM'ye yalnız BİR KEZ dokunur. Satır bazında
-    # sayarsak aynı dokunuş, o bacaktaki talep sayısı kadar çoğaltılmış olur.
-    tir_bacaklari = df[df["Araç türü"] == "Tır"].drop_duplicates(
-        subset=["Araç ID", "Çıkış", "Varış", "Çıkış Tarihi", "Çıkış Saati",
-                "Varış Tarihi", "Varış Saati"]
-    )
-    for _, bacak in tir_bacaklari.iterrows():
-        kapasite.tir_dokunusu_ekle(bacak["Çıkış"], _gun_str(bacak["Çıkış Tarihi"]))
-        kapasite.tir_dokunusu_ekle(bacak["Varış"], _gun_str(bacak["Varış Tarihi"]))
+    _tir_dokunuslarini_isle(df, kapasite)
 
     ihlaller = kapasite.dogrula()
     if ihlaller:

@@ -20,6 +20,14 @@ belirlenir ve tüm bacaklarında korunur — aynı fiziksel aracın rotası boyu
 yeni yük binmesi teorik olarak bir kopyanın bacak bazında kapasiteyi aşmasına yol açabilir;
 bu, çok nadir bir kenar durumdur ve bu issue'nun kapsamında tam bir çok-emtia bin-packing
 çözücüsü yazılmamıştır (§ kapsam notu, `kayan_pencere.py` ile aynı).
+
+Araç sürekliliği (issue #22 LNS zincirleme geliştirmesinde bulundu): bir aracın bacak N+1'i,
+bacak N bitmeden kalkamaz — bu, aracın KENDİ fiziksel kısıtıdır ve bacak N+1'i kullanan
+parçaların KENDİ (tek adımlık) yolculuğundan bağımsızdır. Önceden bu yalnızca bir parçanın
+`adimlar`ı her iki bacağı da kapsıyorsa (§ üstteki `_hazir_ani` zinciri üzerinden) örtük
+sağlanıyordu; ara durakta TAZE binen (önceki bacağı hiç kullanmayan) bir yük varsa (ör.
+konsolidasyon/zincirleme) hiçbir zincir bu kısıtı taşımıyordu. `_bacak_kalkis` artık bunu
+açıkça uyguluyor (bkz. `tests/test_post_pass.py::test_post_pass_farkli_yuk_ayri_bacaklarda_arac_surekliligini_bozmaz`).
 """
 from __future__ import annotations
 
@@ -177,6 +185,19 @@ def post_pass(
             return kalkis_cache[adim]
         hazir_anlari = [_hazir_ani(p, i) for p, i in bacak_parcalari[adim]]
         hazir = max(hazir_anlari)
+
+        # Aracın KENDİSİ önceki bacağı bitirmeden bir sonrakine çıkamaz — bu,
+        # o bacaktaki yükün kendi hazır anından (dogus_ani ya da KENDİ önceki
+        # adımından) bağımsız, aracın fiziksel süreklilik kısıtıdır. Bu bacağı
+        # kullanan TÜM parçalar burada TAZE binmiş olabilir (ör. ara durakta
+        # yeni yük — konsolidasyon/zincirleme, §4.1); o zaman hiçbir parça
+        # zinciri (onceki_adim üzerinden) bu kısıtı örtük taşımaz, burada
+        # açıkça uygulanmalı.
+        arac_indeksi, bacak_no = adim
+        onceki_adim = (arac_indeksi, bacak_no - 1)
+        if bacak_no > 0 and onceki_adim in bacak_parcalari:
+            hazir = max(hazir, _bacak_varis(onceki_adim))
+
         ell_dk = _ellecleme_dk(_bacak_yuk(adim))
         kalkis = hazir + timedelta(minutes=ell_dk)
         kalkis_cache[adim] = kalkis

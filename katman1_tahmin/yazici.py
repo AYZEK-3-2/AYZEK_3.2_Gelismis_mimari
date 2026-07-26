@@ -68,7 +68,12 @@ def talep_tahmini_yaz(tahmin_df: pd.DataFrame, dosya) -> pd.DataFrame:
         gecersiz = set(df.loc[cikti["Talep Tamamlama Saati"].isna(), "slot"])
         raise ValueError(f"Beklenmeyen slot değeri: {gecersiz}")
 
-    cikti = cikti[list(SUTUNLAR)]
-    cikti = cikti[cikti["Tahmin Edilen Desi"] >= 1].reset_index(drop=True)
+    # Düşük değerli (<0,5 dahil) satırlar da SUNULMALI (§3, §8.3: "289 hat x 7
+    # gün x 2 slot = 4.046 satır"). Önceden burada bir "Tahmin Edilen Desi >= 1"
+    # filtresi vardı ve gerçek veride 4046 satırdan 886'sını SESSİZCE düşürüyordu
+    # (3160 satırla teslim ediliyordu) — şartnamenin "bu formata uymayan
+    # takımların sonuçları kesinlikle değerlendirmeye alınmayacaktır" kuralını
+    # ihlal eden ciddi bir hataydı; kaldırıldı.
+    cikti = cikti[list(SUTUNLAR)].reset_index(drop=True)
     cikti.to_excel(dosya, index=False)
     return cikti

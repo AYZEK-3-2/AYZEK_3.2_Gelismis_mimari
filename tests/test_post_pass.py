@@ -83,6 +83,29 @@ def test_post_pass_coklu_bacak_zincirleme_hazir_ani_dogru():
     assert b1.varis_ani == b1.cikis_ani + timedelta(hours=2, minutes=10)
 
 
+def test_post_pass_farkli_yuk_ayri_bacaklarda_arac_surekliligini_bozmaz():
+    """İki FARKLI parça, aynı aracın iki AYRI bacağını (biri yalnız bacak0'ı,
+    diğeri yalnız bacak1'i) kullanıyor — hiçbiri diğerini "zincirlemiyor"
+    (`adimlar` tek elemanlı, `onceki_adim` yok). Araç yine de bacak1'e bacak0'ı
+    bitirmeden çıkamaz; ikinci parçanın KENDİ `dogus_ani`'si ne kadar erken
+    olursa olsun (ör. ara durakta TAZE binen bir yük — konsolidasyon/zincirleme,
+    §4.1, issue #22). Düzeltme öncesi bacak1, D00002'nin kendi dogus_ani'sinden
+    hesaplanıp bacak0 bitmeden (fiziksel olarak imkansız bir şekilde) kalkardı.
+    """
+    kisitlar = K()
+    servis = Servis("Kamyon", False, ("A", "B", "C"), datetime(2026, 6, 29, 10, 0))
+    p0 = Parca("D00001", 1000.0, DOGUS, SLA_BITIS, ((0, 0),))
+    p1 = Parca("D00002", 500.0, DOGUS, SLA_BITIS, ((0, 1),))
+
+    planlar = post_pass(kisitlar, [servis], [p0, p1])
+    b0, b1 = planlar[0].bacaklar
+
+    assert b0.cikis_ani == datetime(2026, 6, 29, 9, 10)
+    assert b0.varis_ani == datetime(2026, 6, 29, 11, 20)
+    assert b1.cikis_ani == b0.varis_ani + timedelta(minutes=5)  # ceil(500*0.01)=5dk, D00002'nin kendi 09:00'ı DEĞİL
+    assert b1.varis_ani == b1.cikis_ani + timedelta(hours=2, minutes=5)
+
+
 def test_post_pass_sla_cezasi_yalniz_son_bacakta():
     kisitlar = K()
     servis = Servis("Kamyon", False, ("A", "B"), datetime(2026, 6, 29, 10, 0))

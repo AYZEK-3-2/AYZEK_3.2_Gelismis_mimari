@@ -53,3 +53,14 @@ KAYAN_PENCERE_ADIM_GUN = 1     # her adımda yalnız ilk gün commit edilir, pen
 # genelde %75+ kalıyor, süre sınırına her koşulda çarpıyor) — ama kısa bütçede bile
 # bulduğu çözüm greedy'den kat kat ucuz kalıyor (kıyas+fallback zaten garantisi).
 KAYAN_PENCERE_ZAMAN_LIMIT_SN = 3.0
+
+# Katman 2 · LNS iyileştirme turu (mimari §5.5, issue #22 — "zaman kalırsa")
+LNS_SURE_BUTCE_SN = 60.0          # tüm yık-onar turunun toplam süre bütçesi
+LNS_KOMSULUK_ZAMAN_LIMIT_SN = 3.0  # tek bir TM-gün komşuluğu onarımı için MILP süresi
+# emtia × aday üst sınırı — milp_cozucu.py'nin kendi ölçek notu (§5.4) "1 günlük
+# dilim ve mini örnekler" icin tasarlandığını, geniş ölçeğin AYRI bir performans
+# issue'su olduğunu söylüyor; gerçek veride yoğun bir TM'nin çok günlük komşuluğu
+# bu sınırı büyük farkla aşabiliyor ve model KURULUMU (solver süre sınırının
+# GÖREMEDİĞİ Python aşaması) dakikalar sürebiliyor (issue #22 canlı testinde
+# bulundu). Aşılırsa o komşuluk denemesi hiç yapılmadan "aday üretilemedi" sayılır.
+LNS_MAX_MODEL_OLCEK = 5_000

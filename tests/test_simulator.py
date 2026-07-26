@@ -1,9 +1,11 @@
 import pandas as pd
 import pytest
+from katman3_simulator.kapasite import KapasiteDefter
 from katman3_simulator.simulator import (
     dogrula_arac_tutarliligi,
     dogrula_rota_gecerliligi,
     dogrula_zaman_cakismasi,
+    _tir_dokunuslarini_isle,
     SimulasyonHatasi,
 )
 
@@ -159,3 +161,65 @@ def test_zaman_cakismasi_hata():
     })
     with pytest.raises(SimulasyonHatasi, match="zaman çakışması"):
         dogrula_zaman_cakismasi(df)
+
+
+# --- Tır dokunuş sayımı (§4.1/§3, issue #22 LNS zincirleme öncesi düzeltme) ---
+
+def _tir_bacak(arac_id, cikis, varis, cikis_tarih, cikis_saat, varis_tarih, varis_saat):
+    return {
+        "Araç ID": arac_id, "Araç türü": "Tır",
+        "Çıkış": cikis, "Varış": varis,
+        "Çıkış Tarihi": cikis_tarih, "Çıkış Saati": cikis_saat,
+        "Varış Tarihi": varis_tarih, "Varış Saati": varis_saat,
+    }
+
+
+def test_direkt_tir_iki_ucta_birer_dokunus_sayar():
+    """Regresyon: tek bacaklı (direkt) sefer önceki davranışla birebir aynı —
+    çıkışta 1, varışta 1, toplam 2 dokunuş."""
+    df = pd.DataFrame([
+        _tir_bacak("V0001", "İstanbul", "Yalova", "29.06.2026", "09:00", "29.06.2026", "10:00"),
+    ])
+    kapasite = KapasiteDefter({}, {"İstanbul": 5, "Yalova": 5})
+    _tir_dokunuslarini_isle(df, kapasite)
+
+    assert kapasite.tir_kullanim[("İstanbul", "29.06.2026")] == 1
+    assert kapasite.tir_kullanim[("Yalova", "29.06.2026")] == 1
+    assert sum(kapasite.tir_kullanim.values()) == 2
+
+
+def test_zincirleme_ara_durakta_tek_dokunus_sayar():
+    """Aynı araç (V0001) A-B-C zincirlemesi yapıyor: B'de hareket etmeden
+    boşaltıp yeniden yüklüyor (§3, §4.1) → B'de 1 dokunuş, 2 DEĞİL.
+    Toplam 3 dokunuş (A, B, C) — len(duraklar) ile birebir, bacak uç noktalarının
+    toplamı (4) değil.
+    """
+    df = pd.DataFrame([
+        _tir_bacak("V0001", "İstanbul", "Yalova", "29.06.2026", "09:00", "29.06.2026", "10:00"),
+        _tir_bacak("V0001", "Yalova", "Eskişehir", "29.06.2026", "10:00", "29.06.2026", "13:00"),
+    ])
+    kapasite = KapasiteDefter({}, {"İstanbul": 5, "Yalova": 1, "Eskişehir": 5})
+    _tir_dokunuslarini_isle(df, kapasite)
+
+    assert kapasite.tir_kullanim[("İstanbul", "29.06.2026")] == 1
+    assert kapasite.tir_kullanim[("Yalova", "29.06.2026")] == 1  # 2 değil!
+    assert kapasite.tir_kullanim[("Eskişehir", "29.06.2026")] == 1
+    assert sum(kapasite.tir_kullanim.values()) == 3
+
+    # Yalova'nın kapasitesi tam 1 — zincirleme olmasaydı (2 dokunuş) aşım olurdu.
+    assert kapasite.dogrula() == []
+
+
+def test_iki_bagimsiz_direkt_sefer_ara_tmde_iki_dokunus_sayar():
+    """Karşıt senaryo (mimari §4.1): A->B ve B->C AYRI araçlarla (V0001, V0002)
+    yapılırsa B'de 2 dokunuş yer — zincirlemenin tam ürettiği tasarruf budur.
+    """
+    df = pd.DataFrame([
+        _tir_bacak("V0001", "İstanbul", "Yalova", "29.06.2026", "09:00", "29.06.2026", "10:00"),
+        _tir_bacak("V0002", "Yalova", "Eskişehir", "29.06.2026", "10:00", "29.06.2026", "13:00"),
+    ])
+    kapasite = KapasiteDefter({}, {"İstanbul": 5, "Yalova": 5, "Eskişehir": 5})
+    _tir_dokunuslarini_isle(df, kapasite)
+
+    assert kapasite.tir_kullanim[("Yalova", "29.06.2026")] == 2
+    assert sum(kapasite.tir_kullanim.values()) == 4
