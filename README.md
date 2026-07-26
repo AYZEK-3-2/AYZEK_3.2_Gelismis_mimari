@@ -55,9 +55,16 @@ Süre logu her koşuda stdout'a yazılır (tipik):
 ```
 veri yukleme :    0.7 sn
 tahmin       :    5.8 sn
-planlama     :    2.3 sn
-dogrulama    :   16.4 sn
-TOPLAM       :   25.2 sn
+planlama     :    1.7 sn
+dogrulama    :   12.2 sn
+TOPLAM       :   19.6 sn
+```
+
+Teslim öncesi bağımsız kontroller:
+
+```bash
+python scripts/teslim_provasi.py cikti/    # sablon + sartname + muhasebe invarianti
+python scripts/saglik_kontrolu.py cikti/   # mimari §10 saglik testleri
 ```
 
 Ek seçenekler:

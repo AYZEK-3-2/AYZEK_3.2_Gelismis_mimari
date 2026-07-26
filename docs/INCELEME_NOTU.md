@@ -23,20 +23,26 @@ Yedi bulgu çıktı; altısı düzeltildi, biri açık bırakıldı (aşağıda 
 | 5 | MILP **kanıtlanmış çözümsüz** (INFEASIBLE) | `--full` bağlansa da çalışmazdı | Düzeltildi |
 | 6 | Kayan pencere son penceresi yük düşürüyor | 16.211 desi / 92 talep sessizce kayboluyordu | Düzeltildi + güvence |
 | 7 | Araç tipi **gerçek yük bilinmeden** seçiliyor | 137 spot araç gereksiz pahalı tiple — 1,68M TL | Düzeltildi |
-| 8 | MILP gerçek ölçekte çözülemiyor | `--full` kazanç getirmiyor (greedy'ye düşüyor) | **Açık** |
-| 9 | Kayan pencerede kapasite defteri pencereler arası taşınmıyor | `--full` kapasite ihlalli plan üretiyor (kapı bloke ediyor) | **Açık** |
+| 8 | Kiralık rezervasyonu tam araç kapasitesinden — Kocaeli'yi tamamen kilitliyor | 120 satır +14 gün → 5,04M TL | Düzeltildi |
+| 9 | `tir_slot_tahsis` elleçleme kapasitesini hiç görmüyor | (8) düzelince 7 TM-günde aşım | Düzeltildi |
+| 10 | `_talepleri_ata` kapasiteyi görmüyor | Gerçek yük tahminden sapıyor, kapı patlıyor | Düzeltildi |
+| 11 | Simülatör varış elleçlemesini **yanlış pencereye** yazıyor | Gece yarısına yakın varışlarda yanlış gün | Düzeltildi |
+| 12 | Yedek araç sabit +14 gün ötelenmiş | 22 satır için 3,99M TL | Düzeltildi |
+| 13 | MILP gerçek ölçekte çözülemiyor | `--full` kazanç getirmiyor (greedy'ye düşüyor) | **Açık** |
+| 14 | Kayan pencerede kapasite defteri pencereler arası taşınmıyor | `--full` kapasite ihlalli plan üretiyor (kapı bloke ediyor) | **Açık** |
 
 **Ölçülen toplam etki (gerçek veri, uçtan uca):**
 
 ```
                         ÖNCE            SONRA          fark
-Araç maliyeti      57.918.428 TL   48.379.386 TL     −16,5%
-SLA cezası        215.777.591 TL   34.642.195 TL     −84,0%
-TOPLAM            273.696.018 TL   83.021.581 TL     −69,7%
+Araç maliyeti      57.918.428 TL   49.029.681 TL     −15,3%
+SLA cezası        215.777.591 TL    1.653.691 TL     −99,2%
+TOPLAM            273.696.018 TL   50.683.372 TL     −81,5%
 
 Doğuş anı ihlali        182 satır          0
 Sığmayan talep               608           0
-Araç sayısı                4.484       3.863         −14%
+Ufuk dışı satır              863          14
+Ufuk dışı SLA      186.534.874 TL         56 TL
 Toplam süre               36,0 sn     19,6 sn
 ```
 
@@ -249,6 +255,56 @@ bağlı olduğundan TM-gün elleçleme muhasebesi etkilenmez.
 
 Ölçülen kazanç: **1.680.038 TL** (tahminle birebir), ve "daha ucuz tiple
 taşınabilecek araç" sayısı 137 → **0**.
+
+### 2.8 Kapasite muhasebesi üç ayrı yerde, gerçek yük bilinmeden yapılıyordu
+
+*(bulgu 8–12, ikinci inceleme turu)*
+
+En büyük ikinci kazanç buradan geldi. Elleçleme kapasitesi `kiralik_placer`,
+`tir_slot_tahsis` ve `spot_placer`'da **tahminle** düşülüyor, gerçek yük ise
+`_talepleri_ata`da belirleniyordu. Zincirleme sonuçlar:
+
+**① Kiralık rezervasyonu tam araç kapasitesindendi.** Mimaride "muhafazakâr,
+bug değil" diye not edilmişti — ama gerçek veride muhafazakâr değil, yıkıcı:
+
+```
+Kocaeli   rezerv 91.200 / kapasite 89.262 = %102,2   kalan −1.938  <-- TÜKENDİ
+İstanbul  rezerv 179.200 / kapasite 394.786 = %45,4
+```
+
+Kalan negatife düşünce defter 0'a kırpıyor ve spot Kocaeli'den **hiçbir gün
+hiçbir şey** taşıyamıyordu. Kocaeli çıkışlı yükün tamamı 14 gün ötelenip zorla
+atanıyordu: **120 satır, sadece 39.960 desi için 5.039.490 TL** SLA cezası.
+
+**② `tir_slot_tahsis` elleçleme kapasitesini hiç hesaba katmıyordu.** ①'in aşırı
+rezervasyonu bunu tesadüfen örtüyordu; ① düzeltilince kapasite kapısı 7 TM-günde
+aşım yakaladı. Artık (TM, gün) bazlı bütçeyle sınırlanıyor.
+
+> Bu kullanımı "günlerin maksimumu" olarak kalıcı düşmek denendi ve **geri
+> alındı** — TM'nin bütün günlerini kısıp ①'deki kilitlenmenin aynısını
+> üretiyor. Canlı testte tek bir tırın 3.000 desisi bir TM'yi 14 gün kilitledi.
+> Doğru mimari: **erken katmanlar filoyu boyutlandırır, kapasiteyi gerçek yükle
+> uygulayan tek yer `_talepleri_ata`dır.**
+
+**③ `_talepleri_ata` kapasiteyi hiç görmüyordu.** Bir araç kendi gününden eski
+talebi de alabildiği için bir TM-güne düşen elleçleme spot_placer'ın
+varsaydığından farklı oluyordu. Artık her ısırık hem çıkış hem varış gününde
+kalan kapasiteyle sınırlanıyor ve araçlar **küresel** olarak kalkış sırasına göre
+işleniyor (bütçe hatlar arası paylaşılan bir kaynaktır, önce kalkan önce alır).
+
+**④ Simülatör varış elleçlemesini yanlış pencereye yazıyordu.** `Varış Saati`
+bacağın **bittiği** andır (şartname: *kullanım süresi = çıkış elleçleme + bekleme
++ seyir + varış elleçleme*). Simülatör pencereyi `[Varış Saati, Varış Saati +
+elleçleme]` sayıyordu — tam bir elleçleme süresi ileri kaymış. Gece yarısına
+yakın varışlarda işi yanlış güne yazıyor ve optimizatörle ayrışıyordu. Doğrusu
+`[Varış Saati − elleçleme, Varış Saati]`.
+
+**⑤ Yedek araç sabit +14 gün ötelenmişti.** SLA cezası gecikmeyle doğrusal
+arttığı için bu 22 satır başına 3.988.605 TL üretiyordu. Artık kapasitesi olan
+**en erken** güne gidiyor: ufuk dışı ceza 3.988.605 → **56 TL**.
+
+Toplam etki: **83.021.581 → 50.683.372 TL (−%38,9)**, SLA cezası
+34.642.195 → 1.653.691 TL (−%95).
 
 ---
 
