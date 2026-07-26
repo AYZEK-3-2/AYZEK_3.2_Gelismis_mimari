@@ -13,8 +13,8 @@ def sahte_plan():
         "Araç ID": ["V0001", "V0001"],
         "Araç Tipi": ["Spot", "Spot"],
         "Araç türü": ["Tır", "Tır"],
-        "Çıkış": ["İstanbul", "İstanbul"],
-        "Varış": ["Yalova", "Yalova"],
+        "Çıkış Transfer Merkezi": ["İstanbul", "İstanbul"],
+        "Varış Transfer Merkezi": ["Yalova", "Yalova"],
         "Çıkış Tarihi": ["29.06.2026", "29.06.2026"],
         "Çıkış Saati": ["09:00", "09:00"],
         "Varış Tarihi": ["29.06.2026", "29.06.2026"],
@@ -22,10 +22,11 @@ def sahte_plan():
         "Talep ID": ["D00001", "D00002"],
         "Taşınan Desi": [5000, 3000],
         "Yolculuk süresi": [56, 56],
-        "Çıkış elleçleme süresi": [80, 80],
+        # SIRA şablonla birebir: önce Varış, sonra Çıkış; sonra SLA, sonra maliyet
         "Varış elleçleme süresi": [80, 80],
-        "Toplam maliyet": [5000.0, 0.0],
+        "Çıkış Elleçleme süresi": [80, 80],
         "SLA cezası": [0.0, 0.0],
+        "Toplam maliyet": [5000.0, 0.0],
     })
 
 

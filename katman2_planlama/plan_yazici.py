@@ -18,15 +18,23 @@ import pandas as pd
 
 import config
 
+# veri/sablon/TASIMA_PLANI_sablon.xlsx ile BİREBİR — ad ve SIRA dahil.
+# Şartname: "bu formata uymayan takımların sonuçları kesinlikle değerlendirmeye
+# alınmayacaktır." Önceden burada `Çıkış`/`Varış` yazıyordu (şablonda `Çıkış
+# Transfer Merkezi`/`Varış Transfer Merkezi`), elleçleme sütunları ters sıradaydı
+# ve son iki sütun (SLA cezası / Toplam maliyet) yer değiştirmişti; sistem kendi
+# içinde tutarlı ama şablona göre YANLIŞ bir dosya üretiyordu.
+# `Çıkış Elleçleme süresi`teki büyük E şablonun kendi tutarsızlığıdır (varış
+# sütununda küçük e) — bilerek birebir kopyalanıyor, düzeltilmiyor.
 SABLON_SUTUNLARI = [
     "Araç ID", "Araç Tipi", "Araç türü",
-    "Çıkış", "Varış",
+    "Çıkış Transfer Merkezi", "Varış Transfer Merkezi",
     "Çıkış Tarihi", "Çıkış Saati",
     "Varış Tarihi", "Varış Saati",
     "Talep ID", "Taşınan Desi",
     "Yolculuk süresi",
-    "Çıkış elleçleme süresi", "Varış elleçleme süresi",
-    "Toplam maliyet", "SLA cezası",
+    "Varış elleçleme süresi", "Çıkış Elleçleme süresi",
+    "SLA cezası", "Toplam maliyet",
 ]
 
 
@@ -86,8 +94,8 @@ def plan_yaz(
                     "Araç ID": arac_id,
                     "Araç Tipi": arac_tipi_str,
                     "Araç türü": arac.arac_tipi,
-                    "Çıkış": bacak.cikis,
-                    "Varış": bacak.varis,
+                    "Çıkış Transfer Merkezi": bacak.cikis,
+                    "Varış Transfer Merkezi": bacak.varis,
                     "Çıkış Tarihi": bacak.cikis_ani.strftime("%d.%m.%Y"),
                     "Çıkış Saati": bacak.cikis_ani.strftime("%H:%M"),
                     "Varış Tarihi": bacak.varis_ani.strftime("%d.%m.%Y"),
@@ -95,8 +103,8 @@ def plan_yaz(
                     "Talep ID": talep.talep_id,
                     "Taşınan Desi": talep.desi,
                     "Yolculuk süresi": bacak.seyir_dk if bacak_ilk_satir else 0,
-                    "Çıkış elleçleme süresi": ell_dk if bacak_ilk_satir else 0,
                     "Varış elleçleme süresi": ell_dk if bacak_ilk_satir else 0,
+                    "Çıkış Elleçleme süresi": ell_dk if bacak_ilk_satir else 0,
                     "Toplam maliyet": arac.toplam_maliyet if arac_ilk_satir else 0.0,
                     "SLA cezası": talep.sla_ceza if talep.son_bacak else 0.0,
                 })

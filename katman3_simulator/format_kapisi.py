@@ -1,4 +1,7 @@
 import pandas as pd
+
+import config
+
 from .simulator import SimulasyonHatasi
 
 
@@ -8,8 +11,38 @@ TAHMIN_SAAT_FORMATI = "SS:DD:ss"  # 09:00:00, 17:00:00
 TARIH_FORMATI = "GG.AA.YYYY"     # 01.04.2026
 
 
+def dogrula_sablon_sutunlari(df: pd.DataFrame, sablon_dosyasi: str) -> None:
+    """Çıktının sütun adları ve SIRASI jüri şablonuyla birebir aynı mı?
+
+    Şartname: *"bu formata uymayan takımların sonuçları kesinlikle
+    değerlendirmeye alınmayacaktır."* Bu, teslimdeki tek diskalifiye maddesi ve
+    tam olarak burada kontrol edilmiyordu: format kapısı yalnız saat biçimini ve
+    araç tiplerini bakıyordu, sütun listesi ise koda ELLE yazılmıştı. Canlı teslim
+    provasında yakalandı — üretilen `Tasima-plani.xlsx` şablondan üç noktada
+    ayrışıyordu:
+      · `Çıkış`/`Varış`      -> şablonda `Çıkış Transfer Merkezi`/`Varış ...`
+      · elleçleme sütunları    -> şablonda önce Varış, sonra Çıkış
+      · son iki sütun          -> şablonda önce SLA cezası, sonra Toplam maliyet
+    Sistem kendi içinde tutarlıydı (yazıcı ve simülatör aynı yanlış listeyi
+    paylaşıyordu), o yüzden hiçbir test bunu göremiyordu. Artık kontrol elle
+    yazılmış bir listeye değil, ŞABLON DOSYANIN KENDİSİNE karşı yapılıyor.
+    """
+    sablon = pd.read_excel(config.SABLON_KLASORU / sablon_dosyasi)
+    beklenen = list(sablon.columns)
+    mevcut = list(df.columns)
+    if mevcut != beklenen:
+        raise SimulasyonHatasi(
+            f"Sütunlar {sablon_dosyasi} şablonuyla uyuşmuyor (ad ve SIRA birebir "
+            f"olmalı — şartname: format hatası = değerlendirme dışı).\n"
+            f"  beklenen: {beklenen}\n"
+            f"  bulunan : {mevcut}"
+        )
+
+
 def dogrula_plan_formati(df: pd.DataFrame) -> None:
     """Tasima-plani.xlsx format kontrolü."""
+    dogrula_sablon_sutunlari(df, "TASIMA_PLANI_sablon.xlsx")
+
     # Saat formatı SS:DD olmalı (saniye yok)
     for kolon in ["Çıkış Saati", "Varış Saati"]:
         for deger in df[kolon].dropna().unique():

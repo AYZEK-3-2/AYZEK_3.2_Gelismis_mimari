@@ -12,16 +12,22 @@ from .hesaplamalar import (
 from .kapasite import KapasiteDefter
 
 
+# veri/sablon/TASIMA_PLANI_sablon.xlsx ile BİREBİR (bkz. plan_yazici.SABLON_SUTUNLARI).
+# §6 gereği katman2'den import edilmez, ikinci kez yazılır — ama kaynak aynı şablondur.
 PLAN_SUTUNLARI = [
     "Araç ID", "Araç Tipi", "Araç türü",
-    "Çıkış", "Varış",
+    "Çıkış Transfer Merkezi", "Varış Transfer Merkezi",
     "Çıkış Tarihi", "Çıkış Saati",
     "Varış Tarihi", "Varış Saati",
     "Talep ID", "Taşınan Desi",
     "Yolculuk süresi",
-    "Çıkış elleçleme süresi", "Varış elleçleme süresi",
-    "Toplam maliyet", "SLA cezası",
+    "Varış elleçleme süresi", "Çıkış Elleçleme süresi",
+    "SLA cezası", "Toplam maliyet",
 ]
+
+# Plan içinde TM sütunlarının adı — uzun oldukları için kısayol.
+CIKIS = "Çıkış Transfer Merkezi"
+VARIS = "Varış Transfer Merkezi"
 
 
 class SimulasyonHatasi(Exception):
@@ -97,14 +103,14 @@ def dogrula_rota_gecerliligi(df: pd.DataFrame) -> None:
 
         duraklar = []
         for _, satir in sirali.iterrows():
-            if satir["Çıkış"] not in duraklar:
-                duraklar.append(satir["Çıkış"])
-            if satir["Varış"] not in duraklar:
-                duraklar.append(satir["Varış"])
+            if satir[CIKIS] not in duraklar:
+                duraklar.append(satir[CIKIS])
+            if satir[VARIS] not in duraklar:
+                duraklar.append(satir[VARIS])
 
         for _, satir in sirali.iterrows():
-            talep_cikis = satir["Çıkış"]
-            talep_varis = satir["Varış"]
+            talep_cikis = satir[CIKIS]
+            talep_varis = satir[VARIS]
             cikis_idx = duraklar.index(talep_cikis)
             varis_idx = duraklar.index(talep_varis)
             if cikis_idx >= varis_idx:
@@ -121,8 +127,8 @@ def dogrula_kiralik(df: pd.DataFrame, kiralik_hatlar) -> None:
 
     for kiralik in kiralik_hatlar:
         eslesme = kiralik_satirlar[
-            (kiralik_satirlar["Çıkış"] == kiralik.cikis)
-            & (kiralik_satirlar["Varış"] == kiralik.varis)
+            (kiralik_satirlar[CIKIS] == kiralik.cikis)
+            & (kiralik_satirlar[VARIS] == kiralik.varis)
             & (kiralik_satirlar["Araç türü"] == kiralik.arac_turu)
         ]
         if eslesme.empty:
@@ -143,7 +149,7 @@ def dogrula_zaman_cakismasi(df: pd.DataFrame) -> None:
     """
     for arac_id, grup in df.groupby("Araç ID"):
         bacaklar = grup.drop_duplicates(
-            subset=["Çıkış", "Varış", "Çıkış Tarihi", "Çıkış Saati", "Varış Tarihi", "Varış Saati"]
+            subset=[CIKIS, VARIS, "Çıkış Tarihi", "Çıkış Saati", "Varış Tarihi", "Varış Saati"]
         )
         sirali = bacaklar.sort_values(["Çıkış Tarihi", "Çıkış Saati"])
         satirlar = list(sirali.iterrows())
@@ -196,7 +202,7 @@ def dogrula_dogus_ani(df: pd.DataFrame, kisitlar) -> None:
             continue
         talep_satiri = talep_satiri.iloc[0]
 
-        if satir["Çıkış"] != talep_satiri["cikis"]:
+        if satir[CIKIS] != talep_satiri["cikis"]:
             continue
 
         saat, dakika = map(int, str(talep_satiri["slot"]).split(":"))
@@ -208,7 +214,7 @@ def dogrula_dogus_ani(df: pd.DataFrame, kisitlar) -> None:
         if kalkis < dogus:
             ihlaller.append(
                 f"  {satir['Araç ID']} / {satir['Talep ID']}: kalkis {kalkis} "
-                f"< dogus {dogus} ({satir['Çıkış']} -> {satir['Varış']})"
+                f"< dogus {dogus} ({satir[CIKIS]} -> {satir[VARIS]})"
             )
 
     if ihlaller:
@@ -244,16 +250,16 @@ def _tir_dokunuslarini_isle(df: pd.DataFrame, kapasite: KapasiteDefter) -> None:
     servisi üretmediği için bu düzeltme mevcut (direkt) senaryoları etkilemez.
     """
     tir_bacaklari = df[df["Araç türü"] == "Tır"].drop_duplicates(
-        subset=["Araç ID", "Çıkış", "Varış", "Çıkış Tarihi", "Çıkış Saati",
+        subset=["Araç ID", CIKIS, VARIS, "Çıkış Tarihi", "Çıkış Saati",
                 "Varış Tarihi", "Varış Saati"]
     )
     for _, grup in tir_bacaklari.groupby("Araç ID"):
         sirali = grup.sort_values(["Çıkış Tarihi", "Çıkış Saati"])
         satirlar = [satir for _, satir in sirali.iterrows()]
         ilk = satirlar[0]
-        kapasite.tir_dokunusu_ekle(ilk["Çıkış"], _gun_str(ilk["Çıkış Tarihi"]))
+        kapasite.tir_dokunusu_ekle(ilk[CIKIS], _gun_str(ilk["Çıkış Tarihi"]))
         for satir in satirlar:
-            kapasite.tir_dokunusu_ekle(satir["Varış"], _gun_str(satir["Varış Tarihi"]))
+            kapasite.tir_dokunusu_ekle(satir[VARIS], _gun_str(satir["Varış Tarihi"]))
 
 
 def _hesapla_maliyet(df: pd.DataFrame, kisitlar) -> list:
@@ -276,7 +282,7 @@ def _hesapla_maliyet(df: pd.DataFrame, kisitlar) -> list:
         toplam_km = 0
 
         bacaklar = grup.groupby(
-            ["Çıkış", "Varış", "Çıkış Tarihi", "Çıkış Saati"]
+            [CIKIS, VARIS, "Çıkış Tarihi", "Çıkış Saati"]
         )
 
         for (cikis, varis, _, _), bacak_df in bacaklar:
@@ -327,7 +333,7 @@ def _hesapla_sla(df: pd.DataFrame, kisitlar) -> list:
         # hesaplarsak (yanlış bir ara-mesafe sla_gun'u ve erken bir ara-varış anıyla)
         # hatalı, çoğunlukla büyük bir ceza uydurulmuş olur. Ara bacaklarda SLA
         # cezası zaten hep 0'dır (§8.2 muhasebe kuralı) — burada da atlanır.
-        if satir["Varış"] != talep_satiri["varis"]:
+        if satir[VARIS] != talep_satiri["varis"]:
             continue
 
         # SLA hedef gün — talebin ORİJİNAL çıkış/varışına göre (bacağın kendi
@@ -388,8 +394,8 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
         cikis_gun = _gun_str(satir["Çıkış Tarihi"])
         varis_gun = _gun_str(satir["Varış Tarihi"])
         desi = float(satir["Taşınan Desi"])  # int() değil — bkz. _hesapla_maliyet notu
-        cikis_tm = satir["Çıkış"]
-        varis_tm = satir["Varış"]
+        cikis_tm = satir[CIKIS]
+        varis_tm = satir[VARIS]
 
         # Çıkış elleçlemesi çıkış gününe
         kapasite.ellecleme_ekle(cikis_tm, cikis_gun, desi)

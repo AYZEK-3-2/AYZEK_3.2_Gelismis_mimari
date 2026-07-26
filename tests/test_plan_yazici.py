@@ -114,7 +114,7 @@ def test_ellecleme_suresi_hesabi():
                          [_talep("D00001", 5000), _talep("D00002", 3000)])],
     )
     df = plan_yaz([arac])
-    assert df.loc[0, "Çıkış elleçleme süresi"] == 80
+    assert df.loc[0, "Çıkış Elleçleme süresi"] == 80
     assert df.loc[0, "Varış elleçleme süresi"] == 80
 
 
@@ -171,8 +171,8 @@ def test_aktarmali_talep_iki_bacak():
     df = plan_yaz([arac])
     assert len(df) == 2
     assert list(df["Talep ID"]) == ["D00002", "D00002"]
-    assert list(df["Çıkış"]) == ["İstanbul", "Yalova"]
-    assert list(df["Varış"]) == ["Yalova", "Eskişehir"]
+    assert list(df["Çıkış Transfer Merkezi"]) == ["İstanbul", "Yalova"]
+    assert list(df["Varış Transfer Merkezi"]) == ["Yalova", "Eskişehir"]
     assert df["Toplam maliyet"].sum() == 1500.0
 
 

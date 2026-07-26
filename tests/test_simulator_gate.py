@@ -37,11 +37,11 @@ def _mock_kisitlar():
 def _plan(maliyet, sla_ceza=0.0, varis_tarih="30.06.2026", varis_saat="09:00"):
     return pd.DataFrame([{
         "Araç ID": "V0001", "Araç Tipi": "Spot", "Araç türü": "Tır",
-        "Çıkış": "A", "Varış": "B",
+        "Çıkış Transfer Merkezi": "A", "Varış Transfer Merkezi": "B",
         "Çıkış Tarihi": "29.06.2026", "Çıkış Saati": "09:00",
         "Varış Tarihi": varis_tarih, "Varış Saati": varis_saat,
         "Talep ID": "D00001", "Taşınan Desi": 5000,
-        "Yolculuk süresi": 179, "Çıkış elleçleme süresi": 50,
+        "Yolculuk süresi": 179, "Çıkış Elleçleme süresi": 50,
         "Varış elleçleme süresi": 50,
         "Toplam maliyet": maliyet, "SLA cezası": sla_ceza,
     }])
@@ -129,20 +129,20 @@ def test_sla_sadece_nihai_varista_hesaplanir_ara_bacakta_degil():
     df = pd.DataFrame([
         {
             "Araç ID": "V0001", "Araç Tipi": "Spot", "Araç türü": "Tır",
-            "Çıkış": "A", "Varış": "B",
+            "Çıkış Transfer Merkezi": "A", "Varış Transfer Merkezi": "B",
             "Çıkış Tarihi": "29.06.2026", "Çıkış Saati": "09:00",
             "Varış Tarihi": "29.06.2026", "Varış Saati": "12:00",
             "Talep ID": "D00001", "Taşınan Desi": 5000,
-            "Yolculuk süresi": 179, "Çıkış elleçleme süresi": 50,
+            "Yolculuk süresi": 179, "Çıkış Elleçleme süresi": 50,
             "Varış elleçleme süresi": 50, "Toplam maliyet": 1000.0, "SLA cezası": 0.0,
         },
         {
             "Araç ID": "V0001", "Araç Tipi": "Spot", "Araç türü": "Tır",
-            "Çıkış": "B", "Varış": "C",
+            "Çıkış Transfer Merkezi": "B", "Varış Transfer Merkezi": "C",
             "Çıkış Tarihi": "29.06.2026", "Çıkış Saati": "12:50",
             "Varış Tarihi": "30.06.2026", "Varış Saati": "09:00",
             "Talep ID": "D00001", "Taşınan Desi": 5000,
-            "Yolculuk süresi": 179, "Çıkış elleçleme süresi": 50,
+            "Yolculuk süresi": 179, "Çıkış Elleçleme süresi": 50,
             "Varış elleçleme süresi": 50, "Toplam maliyet": 0.0, "SLA cezası": 0.0,
         },
     ])
