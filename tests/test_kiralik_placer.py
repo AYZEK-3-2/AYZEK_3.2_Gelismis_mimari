@@ -86,19 +86,38 @@ def test_ugrama_exception(kisitlar, bos_df):
     with pytest.raises(ServisHatasi):
         servis.talep_bagla("Eskişehir", "Kocaeli")
 
-def test_09_cikisinda_17_talep_spota_gider(kisitlar):
-    # 09:00 + 17:00 talebi birlikte var; araç 09:00'da çıkar → 17:00 kargo spot'a
+def test_kiralik_buyuk_slotu_secer(kisitlar):
+    """Kiralık araç, DAHA ÇOK yük taşıyabildiği slottan kalkar.
+
+    Eski kural "09:00'da bir miktar talep varsa 09:00'dan kalk" idi ve bu test o
+    kuralı doğruluyordu — ama kural yanlıştı: desinin %91'i 17:00 slotunda, yani
+    araç küçük dilimi alıp gidiyor, büyük yük PARAYLA spot'a kalıyordu (gerçek
+    veride İstanbul→Yalova 29.06: 09:00'da 3.518, 17:00'da 43.467 desi).
+    Kiralık zaten çıkmak zorunda olduğu için (maliyeti batık) dolu gitmesi her
+    zaman kazançtır.
+
+    Burada 17:00'da daha çok yük var → araç 17:00'dan kalkmalı ve 09:00 dilimi
+    spot'a kalmalı (yük doğmadan araca binemez, tersi mümkün değil).
+    """
     df = pd.DataFrame([
         {"tarih": pd.Timestamp(BASLANGIC.date()), "cikis": "Mersin", "varis": "Kocaeli",
          "toplam_desi": 1000, "slot": "09:00"},
         {"tarih": pd.Timestamp(BASLANGIC.date()), "cikis": "Mersin", "varis": "Kocaeli",
          "toplam_desi": 2000, "slot": "17:00"},
     ])
-    _, kalan_df, _, _ = kiralik_servisleri_yerlestir(kisitlar, df, BASLANGIC)
+    servisler, kalan_df, _, _ = kiralik_servisleri_yerlestir(kisitlar, df, BASLANGIC)
+
+    ilk = min(
+        (s for s in servisler if s.duraklar == ("Mersin", "Kocaeli")
+         and s.cikis_ani.date() == BASLANGIC.date()),
+        key=lambda s: s.cikis_ani,
+    )
+    assert ilk.cikis_ani.hour >= 17, "araç büyük yükün olduğu 17:00 slotundan kalkmalı"
+
     kalan_17 = kalan_df[kalan_df["slot"] == "17:00"]["kalan_desi"].sum()
     kalan_09 = kalan_df[kalan_df["slot"] == "09:00"]["kalan_desi"].sum()
-    assert kalan_17 == 2000.0   # 17:00 kargo tamamı spot'a
-    assert kalan_09 == 0.0      # 09:00 kargo taşındı (kapasite yeterli)
+    assert kalan_17 == 0.0      # büyük yük kiralıkla taşındı
+    assert kalan_09 == 1000.0   # küçük 09:00 dilimi spot'a kaldı
 
 
 def test_gercek_servis_sayisi():

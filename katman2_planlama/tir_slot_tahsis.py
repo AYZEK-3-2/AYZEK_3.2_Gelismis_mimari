@@ -7,11 +7,12 @@ en yüksek tasarruf sağlayan (gün, hat) çiftlerine öncelikli olarak dağıt�
 from __future__ import annotations
 
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pandas as pd
 
+import config
 from katman2_planlama.kiralik_placer import KapasiteDefteri
 from katman2_planlama.servis import Servis, maliyet_hesapla
 
@@ -116,10 +117,22 @@ def tir_slot_tahsis(
     # bütçesi = kiralıktan sonra kalan günlük slot (kapasite.tir_kalan[tm]).
     gun_slot: dict[tuple, int] = {}
 
+    # Kiralık tırların GERÇEK (TM, gün) dokunuşları — `kapasite.tir_kalan` düz
+    # bir TM sayacıdır ve "varış aynı gün" varsayar; 17:00 kalkışlarda varış
+    # ertesi güne taşınca o günün bütçesi olduğundan fazla görünür (canlı testte
+    # Yalova 30.06 → 5/4 slot). Varsa gün bazlı gerçek dokunuş kullanılır.
+    kiralik_dokunus = getattr(kapasite, "tir_dokunus", None)
+
     def _slot_kalan(tm: str, gun) -> int:
         anahtar = (tm, gun)
         if anahtar not in gun_slot:
-            gun_slot[anahtar] = kapasite.tir_kalan.get(tm, 0)
+            if kiralik_dokunus is not None:
+                tam_kapasite = kisitlar.tir_kapasitesi.get(tm, 0)
+                gun_slot[anahtar] = max(
+                    0, tam_kapasite - kiralik_dokunus.get(anahtar, 0)
+                )
+            else:
+                gun_slot[anahtar] = kapasite.tir_kalan.get(tm, 0)
         return gun_slot[anahtar]
 
     # Elleçleme bütçesi (TM, gün). Bu katman tır atarken TM-gün elleçleme
@@ -142,8 +155,23 @@ def tir_slot_tahsis(
         tarih = aday["tarih"]
         slot = aday["slot"]
 
+        baz_saat_on = int(slot.split(":")[0])
+        kalkis_on = datetime.combine(
+            tarih, datetime.min.time().replace(hour=baz_saat_on)
+        )
+        # Varış GÜNÜ kalkış gününden farklı olabilir (17:00 kalkışlarda çoğunlukla
+        # farklıdır) — slot o zaman VARIŞ gününde tükenir. Önceden her iki uç da
+        # kalkış gününe yazılıyordu ve son günlerde kapasite kapısı aşım yakalıyordu
+        # (Balıkesir 05.07 → 2/1). Elleçleme tam tır kapasitesiyle, yani en geç
+        # varışla hesaplanır (§5.4 "süreyi asla eksik gösterme").
+        _ell_tam = math.ceil(tir_kap * config.ELLECLEME_DK_PER_DESI)
+        _seyir = math.ceil(kisitlar.seyir_saat(cikis, varis, "Tır") * 60)
+        varis_gun = (
+            kalkis_on + timedelta(minutes=_ell_tam + _seyir + _ell_tam)
+        ).date()
+
         slot_c = _slot_kalan(cikis, tarih)
-        slot_v = _slot_kalan(varis, tarih)
+        slot_v = _slot_kalan(varis, varis_gun)
         if slot_c == 0 or slot_v == 0:
             continue
 
@@ -155,15 +183,14 @@ def tir_slot_tahsis(
         slot_limitli = min(slot_c, slot_v) * tir_kap
         tasinan = min(
             kalan_desi, slot_limitli,
-            _ell_kalan(cikis, tarih), _ell_kalan(varis, tarih),
+            _ell_kalan(cikis, tarih), _ell_kalan(varis, varis_gun),
         )
         if tasinan <= 0:
             continue
 
         tir_sayisi = min(math.ceil(tasinan / tir_kap), slot_c, slot_v)
 
-        baz_saat = int(slot.split(":")[0])
-        cikis_ani = datetime.combine(tarih, datetime.min.time().replace(hour=baz_saat))
+        cikis_ani = kalkis_on
 
         for _ in range(tir_sayisi):
             tir_servisleri.append(Servis(
@@ -173,9 +200,9 @@ def tir_slot_tahsis(
                 cikis_ani=cikis_ani,
             ))
         gun_slot[(cikis, tarih)] -= tir_sayisi
-        gun_slot[(varis, tarih)] -= tir_sayisi
+        gun_slot[(varis, varis_gun)] -= tir_sayisi
         gun_ell[(cikis, tarih)] -= tasinan
-        gun_ell[(varis, tarih)] -= tasinan
+        gun_ell[(varis, varis_gun)] -= tasinan
 
         df.at[aday["idx"], "kalan_desi"] = max(0.0, kalan_desi - tasinan)
 
@@ -186,7 +213,7 @@ def tir_slot_tahsis(
             "slot": slot,
             "tir_sayisi": tir_sayisi,
             "slot_sonrasi_cikis": gun_slot[(cikis, tarih)],
-            "slot_sonrasi_varis": gun_slot[(varis, tarih)],
+            "slot_sonrasi_varis": gun_slot[(varis, varis_gun)],
         })
 
     # NOT: tırların yediği elleçleme `kapasite`den KALICI olarak düşülmez.

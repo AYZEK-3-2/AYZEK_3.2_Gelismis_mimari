@@ -37,7 +37,19 @@ class KapasiteDefteri:
     def ellecleme_dus(self, tm: str, desi: float) -> None:
         self.ellecleme_kalan[tm] = self.ellecleme_kalan.get(tm, 0) - desi
 
-def _kiralik_gunluk_yuk(hat, tarih, tahmin_df: pd.DataFrame, kisitlar: "Kisitlar"):
+def _kalkis_ve_varis(hat, tarih, baz_saat: int, yuk_desi: float, kisitlar: "Kisitlar"):
+    """Bir kiralık servisin kalkış ve varış anı (araç başına yükle)."""
+    yuk_per_arac = yuk_desi / hat.adet if hat.adet > 0 else 0.0
+    ell_dk = math.ceil(yuk_per_arac * config.ELLECLEME_DK_PER_DESI)
+    kalkis = datetime.combine(
+        tarih, datetime.min.time().replace(hour=baz_saat)
+    ) + timedelta(minutes=ell_dk)
+    seyir_dk = math.ceil(kisitlar.seyir_saat(hat.cikis, hat.varis, hat.arac_turu) * 60)
+    return kalkis, kalkis + timedelta(minutes=seyir_dk + ell_dk)
+
+
+def _kiralik_gunluk_yuk(hat, tarih, tahmin_df: pd.DataFrame, kisitlar: "Kisitlar",
+                        zorunlu_saat: int | None = None):
     """Bir kiralık hattın o gün taşıyacağı yük.
 
     Döner: (yuk_09, yuk_17, yuk_desi, desi_09, desi_17, baz_saat)
@@ -45,7 +57,7 @@ def _kiralik_gunluk_yuk(hat, tarih, tahmin_df: pd.DataFrame, kisitlar: "Kisitlar
     Araç yalnızca KENDİ çıkış slotunun talebini taşır; diğer slotun kargosu o
     saatte hazır değildir (yük doğmadan araca binemez) → tamamı spot'a kalır.
     """
-    toplam_kapasite = kisitlar.arac_tipleri[hat.arac_turu].kapasite_desi * hat.adet
+
 
     maske_base = (
         (tahmin_df["tarih"].dt.date == tarih)
@@ -54,12 +66,30 @@ def _kiralik_gunluk_yuk(hat, tarih, tahmin_df: pd.DataFrame, kisitlar: "Kisitlar
     )
     desi_09 = float(tahmin_df.loc[maske_base & (tahmin_df["slot"] == "09:00"), "toplam_desi"].sum())
     desi_17 = float(tahmin_df.loc[maske_base & (tahmin_df["slot"] == "17:00"), "toplam_desi"].sum())
-    baz_saat = 9 if (desi_09 > 0 or desi_17 == 0) else 17
+
+    # Çıkış slotu: aracın DAHA ÇOK yük taşıyabildiği slot seçilir.
+    #
+    # Önceki kural "09:00'da bir miktar talep varsa 09:00'dan kalk" idi ve gerçek
+    # veride çok pahalıya mal oluyordu: desinin %91'i 17:00 slotunda (mimari §4),
+    # yani kiralık araç neredeyse her gün küçük 09:00 dilimini alıp kalkıyor,
+    # büyük 17:00 yükü ise PARAYLA spot araçlara kalıyordu. Ölçüm — İstanbul→Yalova
+    # 29.06: 09:00'da 3.518 desi, 17:00'da 43.467 desi; iki zorunlu tırın kapasitesi
+    # 44.800. Araç 3.518 taşıyıp gidiyor, 43.467 desi spot'a yazılıyordu.
+    #
+    # Kiralık araç ZATEN çıkmak zorunda (§3: "talep yetersiz olsa bile çıkmak
+    # zorunlu") — maliyeti batıktır. Taşıdığı her desi bir spot aracı ikame eder,
+    # o yüzden dolu gitmesi her zaman kazançtır. Kalkış saatini biz seçiyoruz (§3).
+    # Eşitlikte 09:00 tercih edilir: erken kalkış SLA açısından her zaman >= geç.
+    kap = kisitlar.arac_tipleri[hat.arac_turu].kapasite_desi * hat.adet
+    if zorunlu_saat is not None:
+        baz_saat = zorunlu_saat
+    else:
+        baz_saat = 9 if min(desi_09, kap) >= min(desi_17, kap) else 17
 
     if baz_saat == 9:
-        yuk_09, yuk_17 = min(desi_09, toplam_kapasite), 0.0
+        yuk_09, yuk_17 = min(desi_09, kap), 0.0
     else:
-        yuk_09, yuk_17 = 0.0, min(desi_17, toplam_kapasite)
+        yuk_09, yuk_17 = 0.0, min(desi_17, kap)
 
     return yuk_09, yuk_17, yuk_09 + yuk_17, desi_09, desi_17, baz_saat
 
@@ -90,6 +120,69 @@ def kiralik_servisleri_yerlestir(
             kapasite.tir_slot_dus(hat.cikis, hat.adet)
             kapasite.tir_slot_dus(hat.varis, hat.adet)
 
+    # Kiralık tırların (TM, GÜN) bazlı gerçek dokunuşları.
+    #
+    # `tir_slot_dus` TM başına düz bir sayı düşer ve örtük olarak "varış aynı gün"
+    # varsayar. 17:00 kalkışlarda varış çoğu zaman ERTESİ güne taşar; o zaman bir
+    # TM, hem kendi o günkü kalkışlarından hem de bir önceki günün varışlarından
+    # dokunuş alır ve gerçek günlük dokunuş sayısı düz rezervasyonu aşar. Gerçek
+    # veride kapasite kapısı bunu yakaladı (Yalova 30.06 → 5 / 4 slot).
+    # Dokunuş günü, simülatörün saydığı günle birebir olsun diye VARIŞ ANINDAN
+    # (seyir + varış elleçlemesi dahil) hesaplanır.
+    # Slot seçimi tır kapasitesini de gözetmek ZORUNDA. "Daha çok yük taşı" kuralı
+    # tek başına araçları 17:00'a kaydırıyor, varış ertesi güne taşıyor ve iki
+    # ardışık günün kiralık tırı aynı güne düşüp o TM'nin günlük slotunu aşıyor
+    # (canlı testte Balıkesir 05.07 → 2/1, Tekirdağ 05.07 → 3/2). Bu, kiralık
+    # araçlar ZORUNLU olduğu için sonradan telafi edilemez — seçim anında
+    # kontrol edilmeli. Tercih 17:00 ama slot yetmiyorsa 09:00'a düşülür.
+    secilen_saat: dict[tuple, int] = {}
+    tir_dokunus: dict[tuple, int] = {}
+    for gun in range(7):
+        tarih = (tahmin_baslangic + timedelta(days=gun)).date()
+        for hat in kisitlar.kiralik_hatlar:
+            _, _, yuk_desi, _, _, tercih = _kiralik_gunluk_yuk(
+                hat, tarih, tahmin_df, kisitlar
+            )
+            if hat.arac_turu != "Tır":
+                secilen_saat[(hat, tarih)] = tercih
+                continue
+
+            # TIR için 17:00 ancak varış AYNI GÜN İÇİNDE kalıyorsa seçilir.
+            #
+            # Tır slotu (TM, gün) bazlıdır ve bu hatlarda kapasite zaten günlük
+            # kadans kadardır (ör. Balıkesir kapasite 1, her gün 1 zorunlu tır
+            # alıyor). Varış gece yarısını geçtiği anda o TM iki ardışık günün
+            # tırını aynı güne alır ve slot KAÇINILMAZ olarak aşılır — kiralık
+            # zorunlu olduğu için sonradan telafi de edilemez. Canlı testte
+            # görüldü: 04.07 19:06 kalkış → 05.07 00:42 varış, Balıkesir 2/1.
+            # "Her iki olası günü de rezerve et" denendi; daha fazla aracı
+            # 09:00'a itip başka günlerde 6 aşım üretti, geri alındı.
+            #
+            # Varış anı yüke bağlı olduğu için TAM KAPASİTE (en geç varış)
+            # üzerinden bakılır: en kötü durum aynı gün içinde kalıyorsa gerçek
+            # yükle de kalır (§5.4 "süreyi asla eksik gösterme").
+            kap_tam = kisitlar.arac_tipleri[hat.arac_turu].kapasite_desi * hat.adet
+            for aday_saat in ([tercih] if tercih == 9 else [17, 9]):
+                kalkis, varis = _kalkis_ve_varis(
+                    hat, tarih, aday_saat, kap_tam, kisitlar
+                )
+                if aday_saat == 9 or varis.date() == kalkis.date():
+                    secilen_saat[(hat, tarih)] = aday_saat
+                    _, gercek_varis = _kalkis_ve_varis(
+                        hat, tarih,
+                        aday_saat,
+                        _kiralik_gunluk_yuk(
+                            hat, tarih, tahmin_df, kisitlar, zorunlu_saat=aday_saat
+                        )[2],
+                        kisitlar,
+                    )
+                    anahtar_c = (hat.cikis, kalkis.date())
+                    anahtar_v = (hat.varis, gercek_varis.date())
+                    tir_dokunus[anahtar_c] = tir_dokunus.get(anahtar_c, 0) + hat.adet
+                    tir_dokunus[anahtar_v] = tir_dokunus.get(anahtar_v, 0) + hat.adet
+                    break
+    kapasite.tir_dokunus = tir_dokunus
+
     # Elleçleme rezervasyonu — kiralık aracın GERÇEKTE taşıyacağı yük üzerinden.
     #
     # Önceden burada tam araç kapasitesi (kapasite_desi × adet) rezerve ediliyordu.
@@ -107,7 +200,10 @@ def kiralik_servisleri_yerlestir(
     for gun in range(7):
         tarih = (tahmin_baslangic + timedelta(days=gun)).date()
         for hat in kisitlar.kiralik_hatlar:
-            gunluk_yukler[(hat, tarih)] = _kiralik_gunluk_yuk(hat, tarih, tahmin_df, kisitlar)[2]
+            gunluk_yukler[(hat, tarih)] = _kiralik_gunluk_yuk(
+                hat, tarih, tahmin_df, kisitlar,
+                zorunlu_saat=secilen_saat[(hat, tarih)],
+            )[2]
 
     for hat in kisitlar.kiralik_hatlar:
         en_yuksek = max(
@@ -131,7 +227,10 @@ def kiralik_servisleri_yerlestir(
             arac_obj = kisitlar.arac_tipleri[hat.arac_turu]
 
             yuk_09, yuk_17, yuk_desi, desi_09, desi_17, baz_saat = (
-                _kiralik_gunluk_yuk(hat, tarih, tahmin_df, kisitlar)
+                _kiralik_gunluk_yuk(
+                    hat, tarih, tahmin_df, kisitlar,
+                    zorunlu_saat=secilen_saat[(hat, tarih)],
+                )
             )
             kalan_09 = desi_09 - yuk_09
             kalan_17 = desi_17 - yuk_17

@@ -203,7 +203,8 @@ def _talepleri_ata(
         ]
 
     # Araçlar KÜRESEL olarak kalkış anına göre işlenir (hat hat değil): elleçleme
-    # bütçesi hatlar arasında paylaşılan bir kaynaktır, önce kalkan önce alır.
+    # bütçesi hatlar arasında paylaşılan bir kaynaktır ve gün içinde tükenir,
+    # yani erken kalkan aracın önce alması FİZİKSEL gerçektir.
     arac_sirasi = sorted(
         range(len(servis_bilgileri)),
         key=lambda i: (servis_bilgileri[i]["cikis_ani"], i),
@@ -444,9 +445,26 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
     # ── AracPlan listesi ─────────────────────────────────────────────────────
     arac_planlari: list[AracPlan] = []
 
+    # Boş kalan ZORUNLU kiralık araçlar için 0 desili satır üretilebilsin diye
+    # her hattın bir talep ID'si (o hatta gerçekten var olan) hazır tutulur.
+    hat_ornek_talep: dict[tuple, str] = {}
+    for _, r in tahmin_df.sort_values(["tarih", "slot"], kind="stable").iterrows():
+        hat_ornek_talep.setdefault((str(r["cikis"]), str(r["varis"])), str(r["talep_id"]))
+
     for sb, talepler in atamalar:
         if not talepler:
-            continue  # boş araç (kiralık rotada sıfır talep) → plan'a yazılmaz
+            # Kiralık araç talep yetersiz olsa BİLE çıkmak zorundadır (§3) ve
+            # maliyeti gerçekten oluşur — plana yazılmazsa hem zorunlu sefer
+            # sayısı eksik kalır (gerçek veride 98'in 84'ü yazılıyordu) hem de
+            # bildirdiğimiz maliyet gerçeğin altında görünür. Satır birimi
+            # (Araç ID, bacak, Talep ID) olduğu için 0 desi ile o hattın gerçek
+            # bir talep ID'si kullanılır: araç çıkar, hiçbir yük taşımaz.
+            ornek = hat_ornek_talep.get((sb["cikis"], sb["varis"]))
+            if not sb["kiralik"] or ornek is None:
+                continue  # boş SPOT araç → hiç çalıştırmayız, plana da yazılmaz
+            talepler = [TalepAtama(
+                talep_id=ornek, desi=0.0, son_bacak=False, sla_ceza=0.0,
+            )]
 
         desi_gercek = sum(t.desi for t in talepler)  # int() kesmesi YOK, bkz. _maliyet
 

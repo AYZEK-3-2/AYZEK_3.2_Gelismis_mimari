@@ -121,8 +121,17 @@ def dogrula_rota_gecerliligi(df: pd.DataFrame) -> None:
                 )
 
 
-def dogrula_kiralik(df: pd.DataFrame, kiralik_hatlar) -> None:
-    """12 kiralık araç her gün kendi hattında çıkmış mı kontrol et."""
+def dogrula_kiralik(df: pd.DataFrame, kiralik_hatlar, gun_sayisi: int = 7) -> None:
+    """Her kiralık hat, her gün, TAM `adet` araçla çıkmış mı?
+
+    Şartname: kiralık araç *"talep yetersiz olsa bile çıkmak zorunlu"* (§3).
+    Bu kontrol önceden yalnız "o hatta EN AZ BİR satır var mı" diye bakıyordu ve
+    bu yüzden gerçek eksikleri göremiyordu: gerçek veride 98 zorunlu seferin
+    yalnız 84'ü plana yazılıyordu (adet=2 olan İstanbul→Yalova ve
+    İstanbul→Eskişehir hatlarının ikinci tırı yük bulamayıp düşüyordu) ve kapı
+    YANLIŞLIKLA geçiyordu. Eksik yazılan zorunlu araç hem kısıt ihlalidir hem de
+    bildirilen maliyeti gerçeğin altında gösterir.
+    """
     kiralik_satirlar = df[df["Araç Tipi"] == "Kiralık"]
 
     for kiralik in kiralik_hatlar:
@@ -131,10 +140,17 @@ def dogrula_kiralik(df: pd.DataFrame, kiralik_hatlar) -> None:
             & (kiralik_satirlar[VARIS] == kiralik.varis)
             & (kiralik_satirlar["Araç türü"] == kiralik.arac_turu)
         ]
-        if eslesme.empty:
+        # Satır birimi (Araç ID, bacak, Talep ID) — sefer sayısı için bacak bazında
+        seferler = eslesme.drop_duplicates(
+            subset=["Araç ID", "Çıkış Tarihi", "Çıkış Saati"]
+        )
+        beklenen = gun_sayisi * kiralik.adet
+        if len(seferler) != beklenen:
             raise SimulasyonHatasi(
-                f"Kiralık araç eksik: {kiralik.cikis} -> {kiralik.varis} "
-                f"({kiralik.arac_turu}, {kiralik.adet} adet)"
+                f"Kiralık sefer sayısı yanlış: {kiralik.cikis} -> {kiralik.varis} "
+                f"({kiralik.arac_turu}, {kiralik.adet} adet/gün) — "
+                f"beklenen {beklenen}, bulunan {len(seferler)}. "
+                f"Kiralık araç talep yetersiz olsa bile çıkmak zorundadır (§3)."
             )
 
 

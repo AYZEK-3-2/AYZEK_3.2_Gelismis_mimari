@@ -170,7 +170,16 @@ def test_kabul_gunluk_slot_asilmiyor():
     _, _, kap, _ = kiralik_servisleri_yerlestir(
         kisitlar, _bos_tahmin_df(), config.TAHMIN_BASLANGIC
     )
-    gunluk_butce = dict(kap.tir_kalan)  # kiralıktan sonra günlük spot tır slotu
+    # Günlük spot bütçesi = TM kapasitesi − o GÜN kiralık tırların dokunuşu.
+    # `kap.tir_kalan` düz bir TM sayacıdır ve kiralığı HER güne yazar; ufkun
+    # dışındaki günlerde (05.07 kalkışlarının 06.07 varışları) kiralık dokunuşu
+    # yoktur, o yüzden düz sayaç gerçekten daha katıdır ve testi yanlış yere
+    # düşürür. Gerçek invariant TM kapasitesidir.
+    kiralik_dokunus = getattr(kap, "tir_dokunus", {})
+
+    def _butce(tm, gun):
+        return kisitlar.tir_kapasitesi[tm] - kiralik_dokunus.get((tm, gun), 0)
+
 
     satirlar = []
     for gun in range(7):
@@ -181,13 +190,24 @@ def test_kabul_gunluk_slot_asilmiyor():
                                   "slot": "09:00", "kalan_desi": 10_000_000.0})
     servisler, _, _, _ = tir_slot_tahsis(kisitlar, pd.DataFrame(satirlar), kap)
 
+    # Dokunuş günü: ÇIKIŞ kalkış gününde, VARIŞ ise varış gününde sayılır.
+    # Bu test önceden her iki ucu da kalkış gününe yazıyordu; 17:00 kalkışlarda
+    # varış ertesi güne taştığı için o sayım gerçeği yansıtmıyor (simülatör
+    # `Varış Tarihi`ne bakar). Eski kodda tüm kalkışlar 09:00 olduğu için ikisi
+    # örtüşüyor ve test YANLIŞLIKLA geçiyordu.
+    import math
     dokunus = Counter()
     for s in servisler:
-        gun = s.cikis_ani.date()
-        dokunus[(s.duraklar[0], gun)] += 1
-        dokunus[(s.duraklar[-1], gun)] += 1
+        c, v = s.duraklar[0], s.duraklar[-1]
+        ell = math.ceil(
+            kisitlar.arac_tipleri["Tır"].kapasite_desi * config.ELLECLEME_DK_PER_DESI
+        )
+        seyir = math.ceil(kisitlar.seyir_saat(c, v, "Tır") * 60)
+        varis = s.cikis_ani + timedelta(minutes=ell + seyir + ell)
+        dokunus[(c, s.cikis_ani.date())] += 1
+        dokunus[(v, varis.date())] += 1
     for (tm, gun), n in dokunus.items():
-        assert n <= gunluk_butce[tm], f"{tm} {gun}: {n} > günlük {gunluk_butce[tm]}"
+        assert n <= _butce(tm, gun), f"{tm} {gun}: {n} > günlük {_butce(tm, gun)}"
 
     # Ve per-gün doğru tahsisle toplam, tek-gün bütçesinin çok üstünde olmalı
-    assert len(servisler) > sum(gunluk_butce.values()) // 2
+    assert len(servisler) > sum(kisitlar.tir_kapasitesi.values()) // 4
