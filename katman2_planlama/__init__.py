@@ -20,6 +20,8 @@ from katman2_planlama.spot_placer import spot_arac_ata
 from katman2_planlama.plan_yazici import plan_yaz, AracPlan, BacakAtama, TalepAtama
 from katman2_planlama.servis import Servis, maliyet_hesapla, sla_ceza_hesapla
 
+GUN_SAYISI = 7
+
 
 def _dogus_ani(tarih, slot: str) -> datetime:
     saat = int(str(slot).split(":")[0])
@@ -178,6 +180,77 @@ def _talepleri_ata(
                 })
 
     return atamalar, atanmamis
+
+
+def _milp_talep_df(tahmin: pd.DataFrame) -> pd.DataFrame:
+    """`tahmin` -> `kayan_pencere_coz`/`lns_iyilestir`in beklediği talep şeması."""
+    return pd.DataFrame({
+        "talep_id": tahmin["talep_id"],
+        "tarih": pd.to_datetime(tahmin["tarih"]),
+        "cikis": tahmin["cikis"],
+        "varis": tahmin["varis"],
+        "slot": tahmin["slot"],
+        "toplam_desi": tahmin["tahmin_desi"].astype("float64").clip(lower=0.0),
+    })
+
+
+def plan_uret_full(
+    veri,
+    tahmin,
+    cikti_dizini: str | None = None,
+    *,
+    milp_dakika: float = 10.0,
+    lns_dakika: float = 0.0,
+) -> str:
+    """MILP (kayan pencere) + opsiyonel LNS plan üretici — `--full` yolu.
+
+    `kayan_pencere_coz` her pencerede MILP'i greedy'nin GERÇEK maliyetiyle
+    kıyaslar ve ucuz olanı commit eder; MILP çözüm bulamazsa (UNKNOWN/INFEASIBLE)
+    o pencere greedy'ye düşer. Yani bu yol hiçbir koşulda greedy'den kötü bir
+    plan üretmez — en kötü ihtimalle greedy'nin aynısını, daha uzun sürede üretir.
+
+    `lns_dakika > 0` ise sonuca bir yık-onar turu uygulanır. LNS'in simülatör
+    kapısı `kisitlar.talep`e bakar; o yüzden buraya TAHMİN tablosuyla değiştirilmiş
+    bir `Kisitlar` verilir (katman3_simulator.dogrula_ve_yaz ile aynı sözleşme) —
+    ham `veri` verilseydi kapının SLA kontrolü tahmin ID'lerini (D70001+) tarihsel
+    tabloda bulamayıp SESSİZCE atlardı.
+    """
+    import dataclasses
+
+    from katman2_planlama.kayan_pencere import kayan_pencere_coz
+    from katman2_planlama.lns import lns_iyilestir
+
+    cikti_dizini = cikti_dizini or str(config.CIKTI_KLASORU)
+    Path(cikti_dizini).mkdir(parents=True, exist_ok=True)
+    dosya_yolu = str(Path(cikti_dizini) / "Tasima-plani.xlsx")
+
+    talep_df = _milp_talep_df(tahmin)
+    pencere_butcesi = milp_dakika * 60.0 / GUN_SAYISI
+
+    sonuc = kayan_pencere_coz(
+        veri, talep_df, config.TAHMIN_BASLANGIC,
+        pencere_zaman_limit_sn=pencere_butcesi,
+    )
+    print(f"MILP kayan pencere: {sonuc.toplam_sure_sn:.1f} sn")
+    if not sonuc.pencere_raporu.empty:
+        secim = sonuc.pencere_raporu["secilen"].value_counts().to_dict()
+        print(f"  pencere seçimi: {secim}")
+
+    arac_planlari = sonuc.arac_planlari
+
+    if lns_dakika > 0:
+        veri_lns = dataclasses.replace(veri, talep=talep_df)
+        lns = lns_iyilestir(
+            veri_lns, talep_df, config.TAHMIN_BASLANGIC, arac_planlari,
+            sure_butce_sn=lns_dakika * 60.0,
+        )
+        print(f"LNS: {lns.baslangic_maliyet_tl:,.2f} -> {lns.son_maliyet_tl:,.2f} TL "
+              f"({lns.toplam_sure_sn:.1f} sn)")
+        arac_planlari = lns.arac_planlari
+
+    plan_yaz(arac_planlari, dosya_yolu)
+    print(f"Plan hazir: {len(arac_planlari)} arac")
+    return dosya_yolu
 
 
 def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:

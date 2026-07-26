@@ -64,6 +64,13 @@ KAYAN_PENCERE_ADIM_GUN = 1     # her adımda yalnız ilk gün commit edilir, pen
 # genelde %75+ kalıyor, süre sınırına her koşulda çarpıyor) — ama kısa bütçede bile
 # bulduğu çözüm greedy'den kat kat ucuz kalıyor (kıyas+fallback zaten garantisi).
 KAYAN_PENCERE_ZAMAN_LIMIT_SN = 3.0
+# Pencere sonunda TM'de bekleyip bir sonraki pencereye devreden desi başına ceza.
+# Akış korunumu tek başına yükün ağdan çıkmasına izin vermez; pencereli
+# ayrıştırmada bu, pik günde (18 TM'nin 17'si elleçleme kapasitesinin üstünde)
+# modeli KANITLANMIŞ ÇÖZÜMSÜZ yapıyordu (bkz. milp_cozucu `devir`). Değer bir
+# günlük gecikmenin SLA maliyetine (0,4 TL × 24 saat) denk seçildi: devretmek
+# gerçekten bir gün beklemek demek, o yüzden ne bedava ne de yasak olmalı.
+MILP_DEVIR_CEZA_TL_PER_DESI = 0.4 * 24
 
 # Katman 2 · LNS iyileştirme turu (mimari §5.5, issue #22 — "zaman kalırsa")
 LNS_SURE_BUTCE_SN = 60.0          # tüm yık-onar turunun toplam süre bütçesi

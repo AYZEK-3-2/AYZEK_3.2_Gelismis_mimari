@@ -24,7 +24,7 @@ import numpy as np
 import config
 from katman0_veri import veriyi_yukle
 from katman1_tahmin import tahmin_uret, talep_id_ata, talep_tahmini_yaz
-from katman2_planlama import plan_uret
+from katman2_planlama import plan_uret, plan_uret_full
 from katman3_simulator import dogrula_ve_yaz
 from katman3_simulator.simulator import SimulasyonHatasi
 
@@ -58,10 +58,18 @@ def _seed_ayarla(seed: int) -> None:
 def _args_parse() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="AYZEK 3.2 - Lojistik Optimizasyon")
     p.add_argument("--fast", action="store_true", help="Greedy mod (varsayilan)")
-    p.add_argument("--full", action="store_true", help="MILP+LNS (henuz hazir degil)")
     p.add_argument(
-        "--milp-minutes", type=int, default=10, metavar="N",
+        "--full", action="store_true",
+        help="MILP kayan pencere (+ --lns-minutes ile LNS). Her pencerede greedy "
+             "ile kiyaslanir, kotuyse greedy'ye duser.",
+    )
+    p.add_argument(
+        "--milp-minutes", type=float, default=10.0, metavar="N",
         help="MILP zaman butcesi dakika (--full ile, varsayilan 10)",
+    )
+    p.add_argument(
+        "--lns-minutes", type=float, default=0.0, metavar="N",
+        help="LNS yik-onar turu butcesi dakika (--full ile, varsayilan 0 = kapali)",
     )
     p.add_argument(
         "--seed", type=int, default=config.SEED,
@@ -79,9 +87,6 @@ def main() -> None:
     _seed_ayarla(args.seed)
     cikti_dir = Path(args.output_dir)
 
-    if args.full:
-        print("Uyari: --full modu henuz hazir degil, greedy kullaniliyor.")
-
     t0 = time.perf_counter()
 
     try:
@@ -97,7 +102,14 @@ def main() -> None:
             tmp_talep = str(Path(tmp) / "Talep-tahmini.xlsx")
             tahmin_xlsx = talep_tahmini_yaz(tahmin, tmp_talep)
 
-            tmp_plan = plan_uret(veri, tahmin, cikti_dizini=tmp)
+            if args.full:
+                tmp_plan = plan_uret_full(
+                    veri, tahmin, cikti_dizini=tmp,
+                    milp_dakika=args.milp_minutes,
+                    lns_dakika=args.lns_minutes,
+                )
+            else:
+                tmp_plan = plan_uret(veri, tahmin, cikti_dizini=tmp)
             t3 = time.perf_counter()
 
             dogrula_ve_yaz(veri, tahmin_xlsx, tmp_plan)

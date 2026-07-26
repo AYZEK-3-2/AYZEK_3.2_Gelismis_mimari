@@ -62,6 +62,9 @@ class CozumSonucu:
     durum: str
     cozum_suresi_sn: float
     gap: float | None
+    # Bu pencerede teslim edilemeyen desi (yalnız `karsilanmayan_ceza_tl_per_desi`
+    # verildiğinde dolar); çağıran bunu bir sonraki pencereye devretmelidir.
+    karsilanmayan_desi: float = 0.0
 
 
 def _sabit_kisim_tl(aday: ServisAdayi, kisitlar: "Kisitlar") -> float:
@@ -130,6 +133,7 @@ def milp_coz(
     *,
     zaman_limit_sn: float = config.MILP_ZAMAN_LIMIT_SN,
     warm_start: dict[ServisAdayi, int] | None = None,
+    karsilanmayan_ceza_tl_per_desi: float | None = None,
 ) -> CozumSonucu:
     """Set-partitioning MILP'i kurar ve CP-SAT ile çözer (mimari §5.4).
 
@@ -221,26 +225,75 @@ def milp_coz(
 
     # --- 3) Akış korunumu + talep karşılama ---------------------------------------------
     teslim: dict[tuple[str, Dugum], cp_model.IntVar] = {}
+    devir: dict[str, list[cp_model.IntVar]] = {}
     for emtia in emtialar:
         ilgili = emtia_kenarlari[emtia.emtia_id]
-        dugumler_e: set[Dugum] = {k.kaynak for k in ilgili} | {k.hedef for k in ilgili}
+
+        # Düğüm -> gelen/giden akış değişkenleri indeksi.
+        # ÖLÇEK (canlı ölçümle bulundu): burası önceden her düğüm için `ilgili`
+        # listesinin TAMAMINI iki kez tarıyordu, yani O(düğüm × kenar × emtia).
+        # Gerçek veride 3 günlük pencere 9.831 düğüm × 23.973 kenar × 136 emtia
+        # ≈ 45 MİLYAR karşılaştırma demek; model KURULUMU (CP-SAT'ın süre
+        # sınırının GÖREMEDİĞİ Python aşaması) 20 dakikada bitmiyordu ve
+        # `--full` bu yüzden hiç uçtan uca koşturulamamıştı. Tek geçişte indeks
+        # kurmak aynı kısıtları O(kenar × emtia) ile üretir.
+        gelen: dict[Dugum, list] = {}
+        giden: dict[Dugum, list] = {}
+        for k in ilgili:
+            degisken = f[(emtia.emtia_id, k)]
+            gelen.setdefault(k.hedef, []).append(degisken)
+            giden.setdefault(k.kaynak, []).append(degisken)
+
+        dugumler_e: set[Dugum] = set(gelen) | set(giden)
         for (e_id, cikis, dogus_ani) in injeksiyon:
             if e_id == emtia.emtia_id:
                 dugumler_e.add(Dugum(cikis, dogus_ani))
+
+        # Devir yalnız her TM'nin pencere içindeki SON düğümüne konur: bekleme
+        # kenarları zaten aynı TM'deki ardışık anları zincirlediği için yük oraya
+        # bedavaya bekleyerek ulaşabilir. Her düğüme koymak (ilk denemede öyleydi)
+        # emtia × düğüm kadar değişken üretiyor — gerçek veride 1 günlük pencerede
+        # 68 × 3.298 ≈ 224 bin fazladan değişken, tek kazancı yok.
+        son_dugum_by_tm: dict[str, Dugum] = {}
+        if karsilanmayan_ceza_tl_per_desi is not None:
+            for d in dugumler_e:
+                mevcut = son_dugum_by_tm.get(d.tm)
+                if mevcut is None or d.an > mevcut.an:
+                    son_dugum_by_tm[d.tm] = d
 
         # Determinizm: `set` iterasyon sırası PYTHONHASHSEED'e (string hash'i) bağlı,
         # koşudan koşuya değişebilir — kısıt/değişken oluşturma sırası CP-SAT'ın eşit-
         # maliyetli çözümler arasındaki seçimini etkileyebilir. Sıralı işle.
         for dugum in sorted(dugumler_e, key=lambda d: (d.tm, d.an)):
-            icdogru = [
-                f[(emtia.emtia_id, k)] for k in ilgili if k.hedef == dugum
-            ]
-            disdogru = [
-                f[(emtia.emtia_id, k)] for k in ilgili if k.kaynak == dugum
-            ]
+            icdogru = gelen.get(dugum, [])
+            disdogru = giden.get(dugum, [])
             enjekte = int(round(
                 injeksiyon.get((emtia.emtia_id, dugum.tm, dugum.an), 0.0) * olcek
             ))
+
+            # Pencere sonunda yükün TM'de BEKLEMESİ (bir sonraki pencereye devir).
+            # Akış korunumu tek başına yükün ağdan çıkmasına izin vermez: enjekte
+            # edilen her desi bir varış düğümüne ulaşmak ZORUNDADIR. Pencereli
+            # ayrıştırmada bu, çözülemez bir talep yaratıyor — pencere yalnız kendi
+            # günlerinin servislerini görüyor, ama pik günde (29.06) 18 TM'nin 17'si
+            # elleçleme kapasitesinin %14-52 üstünde, yani o günün yükünün tamamı o
+            # gün taşınamaz. Gerçek veride 1 günlük dilim CP-SAT tarafından
+            # INFEASIBLE olarak KANITLANDI (yalnız yavaş değil, çözümsüz) ve `--full`
+            # bu yüzden hiç uçtan uca çalışmadı. `devir` değişkeni yükün pencerenin
+            # sonunda bulunduğu TM'de kalmasına izin verir; `kayan_pencere_coz` bunu
+            # `kalan_desi` defterinden bir sonraki pencereye taşır.
+            #
+            # Basitleştirme (bilinçli, §5.4 kapsam notlarıyla aynı ilke): ara bir
+            # TM'de bekleyen yük, sonraki pencerede ORİJİNAL çıkışından yeniden
+            # enjekte edilir — kat ettiği yol kaybolur. Muhafazakârdır (maliyeti
+            # asla eksik göstermez), yalnız fırsat kaçırır.
+            if son_dugum_by_tm.get(dugum.tm) == dugum:
+                devir_var = model.NewIntVar(
+                    0, int(round(emtia_toplam_desi[emtia.emtia_id] * olcek)),
+                    f"devir_{emtia.emtia_id}_{dugum.tm}",
+                )
+                devir.setdefault(emtia.emtia_id, []).append(devir_var)
+                disdogru = list(disdogru) + [devir_var]
 
             if dugum.tm == emtia.varis:
                 # Varış TM'sine ulaşan akış TAMAMEN o düğümde teslim edilir — aynı
@@ -260,9 +313,15 @@ def milp_coz(
             else:
                 model.Add(sum(icdogru) + enjekte == sum(disdogru))
 
+        hedef_desi = int(round(emtia_toplam_desi[emtia.emtia_id] * olcek))
+        teslim_toplami = sum(
+            v for (e_id, _), v in teslim.items() if e_id == emtia.emtia_id
+        )
+        # Teslim + (pencere sonunda TM'de bekleyen) devir = toplam talep.
+        # `devir` yoksa (karsilanmayan_ceza_tl_per_desi=None) bu, eskisi gibi sert
+        # "her şey teslim edilecek" eşitliğidir.
         model.Add(
-            sum(v for (e_id, _), v in teslim.items() if e_id == emtia.emtia_id)
-            == int(round(emtia_toplam_desi[emtia.emtia_id] * olcek))
+            teslim_toplami + sum(devir.get(emtia.emtia_id, [])) == hedef_desi
         )
 
     # --- 4) Bacak kapasitesi --------------------------------------------------------------
@@ -347,6 +406,14 @@ def milp_coz(
         if katsayi == 0:
             continue
         terimler.append(katsayi * var)
+
+    if karsilanmayan_ceza_tl_per_desi is not None:
+        katsayi = int(round(
+            karsilanmayan_ceza_tl_per_desi * _PARA_OLCEK / olcek
+        ))
+        for degiskenler in devir.values():
+            for var in degiskenler:
+                terimler.append(katsayi * var)
 
     model.Minimize(sum(terimler))
 
@@ -447,4 +514,7 @@ def milp_coz(
         durum=durum_adi,
         cozum_suresi_sn=time.perf_counter() - t0,
         gap=gap,
+        karsilanmayan_desi=round(
+            sum(solver.Value(v) for vs in devir.values() for v in vs) / olcek, 2
+        ),
     )
