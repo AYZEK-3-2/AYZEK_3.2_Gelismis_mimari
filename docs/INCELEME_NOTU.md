@@ -28,16 +28,22 @@ Yedi bulgu çıktı; altısı düzeltildi, biri açık bırakıldı (aşağıda 
 | 10 | `_talepleri_ata` kapasiteyi görmüyor | Gerçek yük tahminden sapıyor, kapı patlıyor | Düzeltildi |
 | 11 | Simülatör varış elleçlemesini **yanlış pencereye** yazıyor | Gece yarısına yakın varışlarda yanlış gün | Düzeltildi |
 | 12 | Yedek araç sabit +14 gün ötelenmiş | 22 satır için 3,99M TL | Düzeltildi |
-| 13 | MILP gerçek ölçekte çözülemiyor | `--full` kazanç getirmiyor (greedy'ye düşüyor) | **Açık** |
-| 14 | Kayan pencerede kapasite defteri pencereler arası taşınmıyor | `--full` kapasite ihlalli plan üretiyor (kapı bloke ediyor) | **Açık** |
+| 13 | 98 zorunlu kiralık seferin 14'ü planda yok — kapı "en az bir satır" diye bakıyor | Kısıt ihlali + maliyet eksik bildirimi | Düzeltildi |
+| 14 | Kiralık araç küçük slottan kalkıp büyük yükü paraya bırakıyor | Kiralığın taşıdığı desi %5,0 | Düzeltildi |
+| 15 | `tir_slot_tahsis` varış dokunuşunu kalkış gününe yazıyor | Slot aşımı | Düzeltildi |
+| 16 | MILP gerçek ölçekte çözülemiyor | `--full` kazanç getirmiyor (greedy'ye düşüyor) | **Açık** |
+| 17 | Kayan pencerede kapasite defteri pencereler arası taşınmıyor | `--full` kapasite ihlalli plan üretiyor (kapı bloke ediyor) | **Açık** |
+| 18 | `--full` yolu boş zorunlu kiralıkları düşürüyor | Sıkı kapı yakalıyor; o yol zaten teslim edilemez | **Açık** |
 
 **Ölçülen toplam etki (gerçek veri, uçtan uca):**
 
 ```
                         ÖNCE            SONRA          fark
-Araç maliyeti      57.918.428 TL   49.029.681 TL     −15,3%
-SLA cezası        215.777.591 TL    1.653.691 TL     −99,2%
-TOPLAM            273.696.018 TL   50.683.372 TL     −81,5%
+Araç maliyeti      57.918.428 TL   48.747.176 TL     −15,8%
+SLA cezası        215.777.591 TL    1.708.145 TL     −99,2%
+TOPLAM            273.696.018 TL   50.455.321 TL     −81,6%
+
+Zorunlu kiralık        84 / 98        98 / 98
 
 Doğuş anı ihlali        182 satır          0
 Sığmayan talep               608           0
