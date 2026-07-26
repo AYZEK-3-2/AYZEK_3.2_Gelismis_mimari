@@ -15,6 +15,7 @@ Bu doküman "ne yaptık, neden yaptık, neye dikkat edilmeli"yi anlatır.
 | **GitHub** | `AYZEK-3-2/AYZEK_3.2_Gelismis_mimari` (private) |
 | **Pano** | org Projects #2 — "AYZEK Gelişmiş Aşama" |
 | **Mimari (tek kaynak)** | `docs/GELISMIS_Sistem_Mimarisi_v4.md` (+ .docx) |
+| **Arşiv** | `docs/arsiv/GELISMIS_Sistem_Mimarisi_v3.md` — **geçersiz**, yalnız tarihsel kayıt (v4'ün düzelttiği 4 hata dosyanın başında listeli) |
 | **Şartname/soru-cevap** | `veri/dokuman/sartname_gelismis.pdf`, `soru_cevap_oturumu_oncesi.pdf` |
 | **Durum** | 22 issue'nun **tamamı kapalı**, açık branch yok, sistem uçtan uca çalışıyor |
 | **NOT** | Eski MVP repo'su (`AYZEK-3.2-PROJECT`) ayrı ve **artık geçersiz** — gelişmiş aşama bu repodur |
