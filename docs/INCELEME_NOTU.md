@@ -22,22 +22,25 @@ Yedi bulgu çıktı; altısı düzeltildi, biri açık bırakıldı (aşağıda 
 | 4 | MILP model kurulumu O(düğüm × kenar × emtia) | `--full` hiç koşamıyordu (20+ dk, 1,3 GB) | Düzeltildi |
 | 5 | MILP **kanıtlanmış çözümsüz** (INFEASIBLE) | `--full` bağlansa da çalışmazdı | Düzeltildi |
 | 6 | Kayan pencere son penceresi yük düşürüyor | 16.211 desi / 92 talep sessizce kayboluyordu | Düzeltildi + güvence |
-| 7 | MILP gerçek ölçekte çözülemiyor | `--full` kazanç getirmiyor (greedy'ye düşüyor) | **Açık** |
+| 7 | Araç tipi **gerçek yük bilinmeden** seçiliyor | 137 spot araç gereksiz pahalı tiple — 1,68M TL | Düzeltildi |
+| 8 | MILP gerçek ölçekte çözülemiyor | `--full` kazanç getirmiyor (greedy'ye düşüyor) | **Açık** |
+| 9 | Kayan pencerede kapasite defteri pencereler arası taşınmıyor | `--full` kapasite ihlalli plan üretiyor (kapı bloke ediyor) | **Açık** |
 
 **Ölçülen toplam etki (gerçek veri, uçtan uca):**
 
 ```
                         ÖNCE            SONRA          fark
-Araç maliyeti      57.918.428 TL   50.059.253 TL     −13,6%
-SLA cezası        215.777.591 TL   34.642.366 TL     −84,0%
-TOPLAM            273.696.018 TL   84.701.619 TL     −69,1%
+Araç maliyeti      57.918.428 TL   48.379.386 TL     −16,5%
+SLA cezası        215.777.591 TL   34.642.195 TL     −84,0%
+TOPLAM            273.696.018 TL   83.021.581 TL     −69,7%
 
 Doğuş anı ihlali        182 satır          0
 Sığmayan talep               608           0
 Araç sayısı                4.484       3.863         −14%
-Ortalama doluluk           %36,2       %44,3      +8 puan
-Toplam süre               36,0 sn     25,2 sn
+Toplam süre               36,0 sn     19,6 sn
 ```
+
+Mimari §10 sağlık testlerinin tamamı temiz (`scripts/saglik_kontrolu.py`).
 
 ---
 
@@ -227,6 +230,49 @@ Otomatik kontrol listesi — hepsi geçiyor:
 
 ---
 
+### 2.7 Araç tipi gerçek yük bilinmeden seçiliyor
+
+Tip seçimi (`spot_placer._araç_sec`, `tir_slot_tahsis`) araç oluşturulurken, yani
+o aracın gerçekte ne taşıyacağı bilinmeden yapılıyor — tam kapasite varsayımıyla
+"desi başına en ucuz" tip seçiliyor. Atama bittiğinde araç çoğu zaman ondan az
+taşıyor ve seçim artık optimal değil: küçük yükte saatlik kirası düşük bir araç
+neredeyse her zaman daha ucuz.
+
+Ölçüm: 3.779 spot aracın **137'si** daha ucuz bir tiple taşınabiliyordu,
+fazladan maliyet **1.679.867 TL**.
+
+**Düzeltme:** `_gercek_yukte_en_ucuz_tip` — atama bittikten sonra, gerçek yükle
+en ucuz tip yeniden seçiliyor. Tır'a **yükseltme yapılmaz** (tır dokunuşu
+(TM, gün) slotu tüketir ve o bütçe `tir_slot_tahsis`te zaten dağıtılmıştır);
+tırdan düşürmek serbesttir, slot boşaltır. Elleçleme süresi tipe değil desiye
+bağlı olduğundan TM-gün elleçleme muhasebesi etkilenmez.
+
+Ölçülen kazanç: **1.680.038 TL** (tahminle birebir), ve "daha ucuz tiple
+taşınabilecek araç" sayısı 137 → **0**.
+
+---
+
+## 3. Sağlık testlerinin kendisi de düzeltildi
+
+Mimari §10 sağlık testleri `scripts/saglik_kontrolu.py` olarak koda döküldü. İki
+tanesi ilk yazımda **yanlış şeyi ölçüyordu** — §10'un kendi uyarısı: *"bir
+sağlık testinin yanlış olması, olmamasından beterdir."*
+
+1. **"Pik gün SLA cezası > 0"** — cezayı `Çıkış Tarihi == pik gün` diye ölçmek
+   yanlış: pik günün taşamayan yükü zaten *sonraki* günlerde kalkar, cezası da o
+   satırlara düşer. Test 0,00 TL görüp şüphe veriyordu. Ölçülmesi gereken şey
+   yükün **doğduğu** gün. Düzeltildikten sonra: 6.631.558 TL — mimarinin
+   öngördüğü gibi.
+2. **"Tır <100 km hatta çıkmıyor"** — 14 ihlal raporluyordu, hepsi **Kiralık**
+   çıktı (İstanbul→Yalova 60 km, Kocaeli→Yalova 75 km). Kiralık aracın rotası ve
+   türü sözleşmeyle sabittir (§3: *"rota sabit, dönüş yok, talep yetersiz olsa
+   bile çıkmak zorunlu"*) — bizim seçimimiz değil, **veri**. Test yalnız SPOT
+   tırlara bakacak şekilde daraltıldı.
+
+Nihai durum: **tüm sağlık testleri temiz.**
+
+---
+
 ## 4. Açık kalan: `--full` gerçek ölçekte çözülemiyor
 
 `--full` artık **bağlı ve çalışıyor**: her 3 günlük pencerede model kuruluyor,
@@ -256,7 +302,36 @@ yalnız %12'si eleniyor — kayda değer değil.
 3. **Pencereyi 1 güne indir** (3.306 aday, 68 emtia, ~340 bin değişken). Tek
    başına yetmiyor ama 1 ve 2 ile birleşince anlamlı.
 
+### 4.1 İkinci engel: pencereler arası kapasite defteri
+
+Canlı `--full` koşusu (9,2 dk) kapasite kapısına takıldı ve — doğru şekilde —
+**hiçbir dosya yazmadı**:
+
+```
+Elleçleme aşımı: Bilecik 29.06.2026 -> 180.881 / 164.023 desi
+Elleçleme aşımı: Kütahya 29.06.2026 ->  80.453 /  64.732 desi
+Tır slot aşımı : Yalova  02.07.2026 ->       5 /       4 slot
+Tır slot aşımı : Tekirdağ 03.07.2026 ->      3 /       2 slot
+  ... (8 elleçleme + 4 tır slot ihlali)
+```
+
+Sebep: `_greedy_tam_plan` her pencerede kiralık→tır→spot zincirini **sıfırdan,
+tamamen dolu bir `KapasiteDefteri` ile** çalıştırıyor. Pencere N'de commit
+edilen servislerin tükettiği TM-gün elleçleme ve tır slotu, pencere N+1'in
+greedy'sine hiç aktarılmıyor; commit edilen planlar toplamda kapasiteyi aşıyor.
+
+Modül docstring'i bu riski "kapasite defterlerinin pencereler arası
+sızdırılmaması" olarak not etmiş, ama etki tam tersi yönde: sızmama değil,
+**hiç aktarılmama** sorunu var.
+
+Düzeltmek için `_greedy_tam_plan`in önceden tüketilmiş kapasite durumunu girdi
+olarak alması gerekiyor. Bu yapılmadı: MILP zaten hiçbir pencerede kazanmadığı
+için `--full`ün çıktısı en iyi ihtimalle `--fast` ile aynı plan olurdu — teslim
+açısından sıfır kazanç, geç aşamada yeni hata riski ise gerçek.
+
 Bu iş bitene kadar **teslim için varsayılan (greedy) mod kullanılmalıdır.**
+`--full` şu an bir plan üretemez (kapı bloke eder), ama geçersiz bir şey de
+teslim ettirmez.
 
 ---
 

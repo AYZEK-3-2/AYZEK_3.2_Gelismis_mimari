@@ -80,13 +80,18 @@ sonucu greedy taban çizgisinin **gerçek** maliyetiyle kıyaslanır ve ucuz ola
 commit edilir; MILP çözüm bulamazsa o pencere greedy'ye düşer. Bu yüzden
 `--full` hiçbir koşulda greedy'den kötü bir plan üretemez.
 
-**Ama şu an gerçek veride kazanç getirmiyor:** CP-SAT ayrılan sürede hiçbir
-pencerede fizibil çözüm bulamıyor (pencere başına ~2,3M tam sayı değişken), yani
-tüm pencereler greedy'ye düşüyor — sonuç `--fast` ile aynı plan, çok daha uzun
-sürede. Teslim için **varsayılan (greedy) mod kullanılmalıdır.**
+**Ama şu an gerçek veride kullanılamaz** — iki açık engel var:
 
-Kalan iş, aday havuzunu küçültmektir (3 günlük pencerede 9.918 aday); ayrıntılı
-ölçüm ve öneriler: [docs/INCELEME_NOTU.md](docs/INCELEME_NOTU.md).
+1. CP-SAT ayrılan sürede hiçbir pencerede fizibil çözüm bulamıyor (pencere başına
+   ~2,3M tam sayı değişken), yani tüm pencereler greedy'ye düşüyor.
+2. Kayan pencere greedy'yi her pencerede sıfırdan dolu kapasite defteriyle
+   çalıştırıyor; pencereler arası tüketim taşınmadığı için ortaya çıkan plan
+   TM-gün elleçleme ve tır slot kapasitesini aşıyor. Kalite kapısı bunu yakalıyor
+   ve **hiçbir dosya yazılmıyor** (geçersiz bir şey teslim edilmez, ama `--full`
+   de çıktı üretemez).
+
+**Teslim için varsayılan (greedy) mod kullanılmalıdır.** Ayrıntılı ölçüm, kök
+neden ve öneriler: [docs/INCELEME_NOTU.md](docs/INCELEME_NOTU.md).
 
 Klasör düzeni:
 

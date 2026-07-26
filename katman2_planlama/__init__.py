@@ -40,6 +40,43 @@ def _spot_arac_tipi_sec(desi: float, kisitlar) -> str:
     return tir_harici[-1]
 
 
+def _gercek_yukte_en_ucuz_tip(
+    cikis: str, varis: str, mevcut_tip: str, desi_gercek: float, kisitlar,
+) -> str:
+    """Aracın GERÇEK yüküne göre en ucuz araç tipini seçer (yalnız spot).
+
+    Tip seçimi (`spot_placer._araç_sec`, `tir_slot_tahsis`) araç oluşturulurken,
+    yani o aracın gerçekte ne taşıyacağı bilinmeden yapılıyor: tam kapasite
+    varsayımıyla "desi başına en ucuz" tip seçiliyor. Atama bittiğinde araç
+    çoğu zaman ondan az taşıyor ve seçim artık optimal olmayabiliyor — küçük
+    yükte saatlik kirası düşük bir araç neredeyse her zaman daha ucuz.
+    Gerçek veride ölçüldü: 3.779 spot aracın 137'si daha ucuz bir tiple
+    taşınabiliyordu, fazladan maliyet 1.679.867 TL.
+
+    Kurallar
+    --------
+    * Yalnız yükü TAŞIYABİLEN tipler değerlendirilir.
+    * Tır'a YÜKSELTME yapılmaz — tır dokunuşu (TM, gün) slotu tüketir ve o slot
+      bütçesi `tir_slot_tahsis`te zaten dağıtılmıştır; sonradan tır eklemek
+      kısıt sızdırır. Tır'dan DÜŞÜRMEK serbesttir (slot boşaltır, kısıt gevşer)
+      ve §10'un "tır <100 km hatta çıkıyorsa şüphe" sağlık testini de rahatlatır.
+    * Elleçleme süresi tipe değil desiye bağlı olduğu için TM-gün elleçleme
+      muhasebesi bu değişimden etkilenmez.
+    """
+    aday_tipler = [
+        ad for ad, at in kisitlar.arac_tipleri.items()
+        if at.kapasite_desi >= desi_gercek and (ad != "Tır" or mevcut_tip == "Tır")
+    ]
+    if not aday_tipler:
+        return mevcut_tip
+
+    def _mal(ad: str) -> float:
+        return _maliyet(cikis, varis, ad, False, datetime.min, desi_gercek, kisitlar)
+
+    en_ucuz = min(aday_tipler, key=_mal)
+    return en_ucuz if _mal(en_ucuz) < _mal(mevcut_tip) - 0.01 else mevcut_tip
+
+
 def _maliyet(cikis: str, varis: str, arac_tipi: str, kiralik: bool,
              cikis_ani: datetime, desi_gercek: float, kisitlar) -> float:
     """Gerçek taşınan desi'den araç maliyeti hesapla (simülatörle birebir).
@@ -353,6 +390,13 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
         arac_tipi = sb["arac_tipi"]
         kiralik = sb["kiralik"]
         cikis_ani = sb["cikis_ani"]
+
+        # Tip seçimi gerçek yük bilinmeden yapılmıştı; şimdi biliyoruz.
+        # Kiralık aracın türü sözleşmeyle sabit, ona dokunulmaz.
+        if not kiralik:
+            arac_tipi = _gercek_yukte_en_ucuz_tip(
+                cikis, varis, arac_tipi, desi_gercek, kisitlar
+            )
 
         seyir_dk = math.ceil(
             kisitlar.seyir_saat(cikis, varis, arac_tipi) * 60
