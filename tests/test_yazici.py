@@ -91,8 +91,14 @@ def test_gercek_4046_satir_ve_kocaeli_yok(gercek_tahmin):
 
 
 def test_gercek_4046_ve_id_ardisik(gercek_tahmin, tmp_path):
+    """Kabul kriteri (§3/§8.3): 289 hat x 7 gün x 2 slot = TAM 4046 satır,
+    düşük değerli (<0,5 dahil) satırlar da içinde. Regresyon: yazıcıda önceden
+    "Tahmin Edilen Desi >= 1" filtresi vardı ve gerçek veride 886 satırı
+    (4046 -> 3160) sessizce düşürüyordu — şartnamenin format kuralını ihlal
+    eden ciddi bir hataydı (issue #22 canlı testinde bulundu), kaldırıldı.
+    """
     cikti = talep_tahmini_yaz(gercek_tahmin, tmp_path / "Talep-tahmini.xlsx")
-    assert len(cikti) >= 1
+    assert len(cikti) == 289 * 7 * 2 == 4046
     assert cikti["Talep ID"].is_unique
     assert cikti["Talep ID"].iloc[0].startswith("D7")
 

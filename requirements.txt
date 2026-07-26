@@ -5,4 +5,4 @@ python-calamine==0.8.2
 lightgbm>=4.0
 scikit-learn>=1.3
 pytest>=8.0
-# ortools  # CP-SAT/MILP icin (issue #18-22, henuz aktif degil)
+ortools  # CP-SAT/MILP icin (issue #18-22)

@@ -19,7 +19,12 @@ from katman2_planlama.kiralik_placer import kiralik_servisleri_yerlestir
 from katman2_planlama.tir_slot_tahsis import tir_slot_tahsis
 from katman2_planlama.spot_placer import spot_arac_ata
 from katman2_planlama.plan_yazici import plan_yaz, AracPlan, BacakAtama, TalepAtama
-from katman2_planlama.servis import Servis, maliyet_hesapla
+from katman2_planlama.servis import Servis, maliyet_hesapla, sla_ceza_hesapla
+
+
+def _dogus_ani(tarih, slot: str) -> datetime:
+    saat = int(str(slot).split(":")[0])
+    return datetime.combine(pd.Timestamp(tarih).date(), datetime.min.time().replace(hour=saat))
 
 
 def _spot_arac_tipi_sec(desi: float, kisitlar) -> str:
@@ -117,12 +122,15 @@ def _talepleri_ata(
         if t["kalan"] < 1e-9:
             q.popleft()
 
+        sla_bitis = _dogus_ani(t["tarih"], t["slot"]) + timedelta(
+            days=kisitlar.sla_gun(t["cikis"], t["varis"])
+        )
         talep = TalepAtama(
             talep_id=t["talep_id"],
             desi=alinacak,
             son_bacak=True,
-            sla_ceza=0.0,   # D70001+ → simülatör SLA kontrolünü atlar
-            sla_bitis=None,
+            sla_ceza=0.0,   # plan_uret ana döngüsünde varis_ani bilindiğinde hesaplanır
+            sla_bitis=sla_bitis,
         )
         atamalar.append((sb, [talep]))
 
@@ -243,6 +251,14 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
         ell_v_dk = math.ceil(desi_gercek * config.ELLECLEME_DK_PER_DESI)
         varis_ani = cikis_ani + timedelta(minutes=seyir_dk + ell_v_dk)
 
+        # SLA cezası — varis_ani ancak burada bilindiği için (_talepleri_ata
+        # yalnız araç eşleşmesine bakar, zamanlamayı bilmez) gerçek gecikme
+        # burada hesaplanır; _talepleri_ata yalnız sla_bitis'i (kök talebin
+        # doğuş anı + sla_gun) önceden hesaplayıp taşımıştı.
+        for talep in talepler:
+            if talep.sla_bitis is not None:
+                talep.sla_ceza = sla_ceza_hesapla(varis_ani, talep.sla_bitis, talep.desi)
+
         mal = _maliyet(cikis, varis, arac_tipi, kiralik, cikis_ani, desi_gercek, kisitlar)
 
         bacak = BacakAtama(
@@ -284,6 +300,14 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
 
         mal = _maliyet(cikis, varis, arac_tipi, False, late_cikis, desi, kisitlar)
 
+        # Bu yük yapısal olarak geç (14 gün ötelenmiş) — SLA cezası kaçınılmaz
+        # biçimde büyük olacaktır; 0 yazmak muhasebe invariantını (§8.2) yanlış
+        # gösterir. sla_bitis, kök talebin GERÇEK (ötelenmemiş) doğuş anına göre.
+        sla_bitis = _dogus_ani(t["tarih"], t["slot"]) + timedelta(
+            days=kisitlar.sla_gun(cikis, varis)
+        )
+        sla_ceza = sla_ceza_hesapla(late_varis, sla_bitis, desi)
+
         bacak = BacakAtama(
             cikis=cikis,
             varis=varis,
@@ -294,8 +318,8 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
                 talep_id=t["talep_id"],
                 desi=desi,
                 son_bacak=True,
-                sla_ceza=0.0,
-                sla_bitis=None,
+                sla_ceza=sla_ceza,
+                sla_bitis=sla_bitis,
             )],
         )
         arac_planlari.append(AracPlan(
@@ -304,6 +328,31 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
             bacaklar=[bacak],
             toplam_maliyet=mal,
         ))
+
+    # ── Bölünmüş kök talepleri suffix'le (D00001-1, D00001-2, ...) ──────────
+    # Greedy'nin "tek ısırık" mekanizması (+ 14 gün geç-tarihli devir) BÜYÜK
+    # bir talebi aynı kök ID ile (suffix'siz) birden fazla satıra/araca
+    # dağıtabilir. Her bite KENDİ varış anına göre kendi SLA cezasını taşıdığı
+    # için (biri zamanında, biri geç kalabilir) aynı kök ID birden fazla
+    # satırda sıfırdan farklı ceza taşıyabilir — bu, muhasebe invariantını
+    # (§8.2, issue #22 canlı testinde bulundu) ihlal eder. Fiilen bölünen
+    # talepler §3'ün "Talep bölme: Serbest. D00001-1, D00001-2" kuralına göre
+    # suffix'lenir (yalnız GERÇEKTEN bölünenler — tek satırda kalanlar
+    # suffix'siz kalır) ki her biri bağımsız bir parça olarak muhasebeleşsin.
+    kok_toplam: dict[str, int] = {}
+    for arac in arac_planlari:
+        for bacak in arac.bacaklar:
+            for talep in bacak.talepler:
+                kok_toplam[talep.talep_id] = kok_toplam.get(talep.talep_id, 0) + 1
+
+    kok_sayaci: dict[str, int] = {}
+    for arac in arac_planlari:
+        for bacak in arac.bacaklar:
+            for talep in bacak.talepler:
+                kok = talep.talep_id
+                if kok_toplam[kok] > 1:
+                    kok_sayaci[kok] = kok_sayaci.get(kok, 0) + 1
+                    talep.talep_id = f"{kok}-{kok_sayaci[kok]}"
 
     # ── Plan dosyasına yaz ───────────────────────────────────────────────────
     plan_yaz(arac_planlari, dosya_yolu)

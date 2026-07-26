@@ -49,15 +49,37 @@ def dogrula_muhasebe(df: pd.DataFrame) -> None:
                 f"{arac_id} için Toplam maliyet hiçbir satırda yok"
             )
 
+    # SLA cezası: aynı Talep ID için en fazla bir satırda (nihai teslim
+    # bacağı) değer olmalı — diğer (ara) bacak satırlarında 0. 0'da hiç
+    # ceza olmaması NORMALDİR (zamanında teslim); yalnız TEKRAR/ÇOKLU
+    # yazım yakalanır.
+    for talep_id, grup in df.groupby("Talep ID"):
+        ceza_satirlari = grup[grup["SLA cezası"] != 0]
+        if len(ceza_satirlari) > 1:
+            raise SimulasyonHatasi(
+                f"{talep_id} için SLA cezası birden fazla satırda yazılmış "
+                f"({len(ceza_satirlari)} satır)"
+            )
+
 
 def dogrula_talep_butunlugu(plan_df: pd.DataFrame, tahmin_df: pd.DataFrame) -> None:
-    """Plan ve tahmin dosyasındaki talep ID'leri eşleşmeli."""
+    """Plan ve tahmin dosyasındaki talep ID'leri eşleşmeli.
+
+    Yalnız GERÇEKTEN taşınacak yükü olan (Tahmin Edilen Desi > 0) talepler
+    planda karşılık bulmak ZORUNDADIR. `Tahmin-tahmini.xlsx` §3/§8.3 gereği
+    0 değerli satırları da içerir (289 hat x 7 gün x 2 slot = tam 4046 satır);
+    0 desi öngörülen bir (hat, gün, slot) için fiziksel olarak taşınacak hiçbir
+    şey yoktur, o yüzden planda hiç yer almaması beklenen ve doğru bir durumdur
+    — bu ayrım yapılmazsa (issue #22 canlı testinde bulundu) tamamen doğru,
+    tam kapsamlı bir plan bile "eksik talep" hatasıyla reddedilir.
+    """
     plan_kokler = set()
     for tid in plan_df["Talep ID"].unique():
         kok = str(tid).split("-")[0]  # D00001-1 -> D00001
         plan_kokler.add(kok)
 
-    tahmin_idler = set(tahmin_df["Talep ID"].unique())
+    tasinacak = tahmin_df[tahmin_df["Tahmin Edilen Desi"] > 0]
+    tahmin_idler = set(tasinacak["Talep ID"].unique())
 
     eksik = tahmin_idler - plan_kokler
     if eksik:
