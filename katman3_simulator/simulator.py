@@ -400,11 +400,25 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
         # Çıkış elleçlemesi çıkış gününe
         kapasite.ellecleme_ekle(cikis_tm, cikis_gun, desi)
 
-        # Varış elleçlemesi — gece yarısını aşıyorsa böl
-        varis_saati_str = str(satir["Varış Saati"])
-        vs, vd = map(int, varis_saati_str.split(":"))
-        varis_dakika = vs * 60 + vd
+        # Varış elleçlemesi — gece yarısını aşıyorsa böl.
+        #
+        # `Varış Saati` bacağın BİTTİĞİ andır: şartname "kullanım süresi = çıkış
+        # elleçleme + bekleme + seyir + varış elleçleme" der, yani varış
+        # elleçlemesi o ana kadar TAMAMLANMIŞTIR. Dolayısıyla elleçleme penceresi
+        # [Varış Saati − elleçleme, Varış Saati]'dir.
+        #
+        # Burada önceden pencere [Varış Saati, Varış Saati + elleçleme] sayılıyordu
+        # — tam bir elleçleme süresi kadar ileri kaymış. Gece yarısına yakın
+        # varışlarda bu, işi yanlış güne (ya da yanlış oranla iki güne) yazıyordu
+        # ve optimizatörün muhasebesiyle ayrışıyordu; gerçek veride 3 TM-günde
+        # küçük ama gerçek "aşım" üretiyordu (İstanbul 30.06: 397.016 / 394.786).
+        # §3'ün altın vektörü ("23:30'da 10.000 desi → 3.000 / 7.000") elleçlemenin
+        # BAŞLANGIÇ anına dayanır; başlangıç = Varış Saati − elleçleme.
         ell_sure = ellecleme_suresi_dk(desi)
+        varis_bitis = _tarihe_cevir(satir["Varış Tarihi"], satir["Varış Saati"])
+        varis_baslangic = varis_bitis - timedelta(minutes=ell_sure)
+        varis_gun = _gun_str(varis_baslangic)
+        varis_dakika = varis_baslangic.hour * 60 + varis_baslangic.minute
 
         bugun_oran, yarin_oran = gece_yarisi_bolme(varis_dakika, ell_sure)
 
@@ -412,8 +426,7 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
             bugun_desi = desi * bugun_oran
             yarin_desi = desi - bugun_desi
             kapasite.ellecleme_ekle(varis_tm, varis_gun, bugun_desi)
-            varis_dt = _tarihe_cevir(satir["Varış Tarihi"], satir["Varış Saati"])
-            yarin_str = _gun_str(varis_dt + timedelta(days=1))
+            yarin_str = _gun_str(varis_baslangic + timedelta(days=1))
             kapasite.ellecleme_ekle(varis_tm, yarin_str, yarin_desi)
         else:
             kapasite.ellecleme_ekle(varis_tm, varis_gun, desi)

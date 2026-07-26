@@ -24,9 +24,17 @@ if TYPE_CHECKING:
 class ElleçlemeDefteri:
     """TM–gün bazında spot elleçleme kapasitesi takibi."""
 
-    def __init__(self, gunluk_limit: dict[str, float]) -> None:
+    def __init__(
+        self,
+        gunluk_limit: dict[str, float],
+        baslangic_kullanim: dict[tuple[str, date], float] | None = None,
+    ) -> None:
         self._limit = gunluk_limit
-        self._kullanim: dict[tuple[str, date], float] = {}
+        # `baslangic_kullanim`: önceki katmanların (tır tahsisi) o (TM, gün)'de
+        # zaten tükettiği elleçleme. GÜN bazlıdır — TM'nin tüm günlerini kısan
+        # tek bir sayı değil; o yaklaşım canlı testte bir TM'yi tamamen
+        # kilitleyip yükü 14 gün öteletmişti (bkz. tir_slot_tahsis notu).
+        self._kullanim: dict[tuple[str, date], float] = dict(baslangic_kullanim or {})
 
     def kalan(self, tm: str, gun: date) -> float:
         return max(0.0, self._limit.get(tm, 0.0) - self._kullanim.get((tm, gun), 0.0))
@@ -117,7 +125,10 @@ def spot_arac_ata(
     rapor_df    : her servisin kalkış / teslim / ceza özeti
     ell_defter  : final elleçleme defteri (testler için kapasite doğrulaması)
     """
-    ell = ElleçlemeDefteri(dict(kapasite.ellecleme_kalan))
+    ell = ElleçlemeDefteri(
+        dict(kapasite.ellecleme_kalan),
+        getattr(kapasite, "tir_ellecleme_kullanim", None),
+    )
 
     bekleyen: list[dict] = []
     for _, row in kalan_talep_df.iterrows():

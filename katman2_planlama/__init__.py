@@ -138,6 +138,8 @@ def _talepleri_ata(
     -------
     atamalar  : [(servis_bilgisi, [TalepAtama, ...]), ...]  ← araç başına 0..n talep
     atanmamis : hiçbir araca sığmayan (desi > 1e-9) talep dicts
+    ell_kalan : {(TM, gün): kalan elleçleme desi} — yedek (geç-tarihli) araç
+                yolunun boş bir güne yerleşebilmesi için
     """
     # Hat bazında talep listesi — sıfır ve negatif desiyi atla
     hat_talepleri: dict[tuple, list[dict]] = {}
@@ -159,49 +161,110 @@ def _talepleri_ata(
             "dogus_ani": _dogus_ani(row["tarih"], str(row["slot"])),
         })
 
-    # Araçları hatlarına göre grupla; her hat içinde kalkış anına göre sırala.
-    # `servis_bilgileri` içindeki orijinal sıra korunmalı (çağıran atamaları
-    # sırayla eşleştiriyor), o yüzden indeksle çalışılır.
-    hat_araclari: dict[tuple, list[int]] = {}
-    for i, sb in enumerate(servis_bilgileri):
-        hat_araclari.setdefault((sb["cikis"], sb["varis"]), []).append(i)
-    for idxler in hat_araclari.values():
-        idxler.sort(key=lambda i: servis_bilgileri[i]["cikis_ani"])
+    # TM-gün elleçleme bütçesi.
+    #
+    # Kapasite muhasebesi önceden ÜÇ ayrı yerde, gerçek yük bilinmeden TAHMİNLE
+    # yapılıyordu (kiralik_placer rezervasyonu, tir_slot_tahsis, spot_placer).
+    # Gerçek yük ise burada belirleniyor: bir araç kendi gününden daha eski,
+    # karşılanmamış talebi de alabildiği için bir TM-güne düşen elleçleme,
+    # spot_placer'ın varsaydığından farklı oluyor ve kapasite kapısı aşım
+    # yakalıyordu. Bütçe artık kararın verildiği yerde tutuluyor: her ısırık,
+    # hem çıkış hem varış gününde kalan kapasiteyle sınırlanıyor.
+    #
+    # Katman 3 ile kod paylaşılmaz (§6); buradaki gece yarısı bölme ve elleçleme
+    # süresi hesabı kasıtlı olarak ikinci kez, bağımsız yazılmıştır.
+    ell_kalan: dict[tuple, float] = {}
+
+    def _ell(tm: str, gun) -> float:
+        anahtar = (tm, gun)
+        if anahtar not in ell_kalan:
+            ell_kalan[anahtar] = float(kisitlar.ellecleme_kapasitesi.get(tm, 0.0))
+        return ell_kalan[anahtar]
+
+    def _varis_ani(sb: dict, yuk: float) -> datetime:
+        seyir_dk = math.ceil(
+            kisitlar.seyir_saat(sb["cikis"], sb["varis"], sb["arac_tipi"]) * 60
+        )
+        return sb["cikis_ani"] + timedelta(minutes=seyir_dk)
+
+    def _varis_paylari(varis_ani: datetime, yuk: float) -> list[tuple]:
+        """Varış elleçlemesinin gün(ler)e dağılımı — gece yarısını aşarsa oransal."""
+        dk = math.ceil(yuk * config.ELLECLEME_DK_PER_DESI - config.TAVAN_TOLERANSI_DK)
+        if dk <= 0:
+            return [(varis_ani.date(), 0.0)]
+        bitis = varis_ani + timedelta(minutes=dk)
+        if varis_ani.date() == bitis.date():
+            return [(varis_ani.date(), yuk)]
+        gece = datetime.combine(bitis.date(), datetime.min.time())
+        gun1 = (gece - varis_ani).total_seconds() / 60.0
+        return [
+            (varis_ani.date(), yuk * gun1 / dk),
+            (bitis.date(), yuk * (dk - gun1) / dk),
+        ]
+
+    # Araçlar KÜRESEL olarak kalkış anına göre işlenir (hat hat değil): elleçleme
+    # bütçesi hatlar arasında paylaşılan bir kaynaktır, önce kalkan önce alır.
+    arac_sirasi = sorted(
+        range(len(servis_bilgileri)),
+        key=lambda i: (servis_bilgileri[i]["cikis_ani"], i),
+    )
 
     arac_talepleri: dict[int, list[TalepAtama]] = {}
 
-    for key, araclar in hat_araclari.items():
-        talepler = hat_talepleri.get(key)
+    for arac_idx in arac_sirasi:
+        sb = servis_bilgileri[arac_idx]
+        talepler = hat_talepleri.get((sb["cikis"], sb["varis"]))
         if not talepler:
             continue
-        sla_gun = kisitlar.sla_gun(key[0], key[1])
 
-        for arac_idx in araclar:
-            sb = servis_bilgileri[arac_idx]
-            bos_kapasite = float(sb["yuk_desi"])
-            cikis_ani = sb["cikis_ani"]
+        sla_gun = kisitlar.sla_gun(sb["cikis"], sb["varis"])
+        cikis_ani = sb["cikis_ani"]
+        cikis_gun = cikis_ani.date()
+        varis_gun = _varis_ani(sb, 0.0).date()
 
-            for t in talepler:
-                if bos_kapasite < 1e-9:
-                    break
-                if t["kalan"] < 1e-9:
-                    continue
-                # Kural 1: yük doğmadan binemez
-                if t["dogus_ani"] > cikis_ani:
-                    continue
+        bos_kapasite = min(
+            float(sb["yuk_desi"]),
+            _ell(sb["cikis"], cikis_gun),
+            _ell(sb["varis"], varis_gun),
+        )
 
-                alinacak = min(t["kalan"], bos_kapasite)
-                t["kalan"] -= alinacak
-                bos_kapasite -= alinacak
+        yuklenen = 0.0
+        for t in talepler:
+            if bos_kapasite < 1e-9:
+                break
+            if t["kalan"] < 1e-9:
+                continue
+            # Kural 1: yük doğmadan binemez
+            if t["dogus_ani"] > cikis_ani:
+                continue
 
-                arac_talepleri.setdefault(arac_idx, []).append(TalepAtama(
-                    talep_id=t["talep_id"],
-                    desi=alinacak,
-                    son_bacak=True,
-                    # plan_uret ana döngüsünde varis_ani bilindiğinde hesaplanır
-                    sla_ceza=0.0,
-                    sla_bitis=t["dogus_ani"] + timedelta(days=sla_gun),
-                ))
+            alinacak = min(t["kalan"], bos_kapasite)
+            t["kalan"] -= alinacak
+            bos_kapasite -= alinacak
+            yuklenen += alinacak
+
+            arac_talepleri.setdefault(arac_idx, []).append(TalepAtama(
+                talep_id=t["talep_id"],
+                desi=alinacak,
+                son_bacak=True,
+                # plan_uret ana döngüsünde varis_ani bilindiğinde hesaplanır
+                sla_ceza=0.0,
+                sla_bitis=t["dogus_ani"] + timedelta(days=sla_gun),
+            ))
+
+        if yuklenen > 0:
+            # Araç tipini GERÇEK yükle burada yeniden seç — elleçlemenin hangi
+            # güne yazılacağı aracın varış anına, o da tipin seyir süresine bağlı.
+            # Tip sonradan (plan_uret'te) değiştirilirse varış günü kayar ve
+            # elleçleme burada bütçelenenden BAŞKA bir güne düşer; gerçek veride
+            # 3 TM-günde küçük ama gerçek aşıma yol açıyordu.
+            if not sb["kiralik"]:
+                sb["arac_tipi"] = _gercek_yukte_en_ucuz_tip(
+                    sb["cikis"], sb["varis"], sb["arac_tipi"], yuklenen, kisitlar
+                )
+            ell_kalan[(sb["cikis"], cikis_gun)] = _ell(sb["cikis"], cikis_gun) - yuklenen
+            for gun, pay in _varis_paylari(_varis_ani(sb, yuklenen), yuklenen):
+                ell_kalan[(sb["varis"], gun)] = _ell(sb["varis"], gun) - pay
 
     atamalar = [
         (sb, arac_talepleri.get(i, []))
@@ -216,7 +279,7 @@ def _talepleri_ata(
                     k: v for k, v in t.items() if k != "dogus_ani"
                 })
 
-    return atamalar, atanmamis
+    return atamalar, atanmamis, ell_kalan
 
 
 def _milp_talep_df(tahmin: pd.DataFrame) -> pd.DataFrame:
@@ -374,7 +437,9 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
         })
 
     # ── Talepleri araçlara ata ───────────────────────────────────────────────
-    atamalar, atanmamis = _talepleri_ata(servis_bilgileri, tahmin_df, kisitlar)
+    atamalar, atanmamis, ell_kalan = _talepleri_ata(
+        servis_bilgileri, tahmin_df, kisitlar
+    )
 
     # ── AracPlan listesi ─────────────────────────────────────────────────────
     arac_planlari: list[AracPlan] = []
@@ -391,12 +456,9 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
         kiralik = sb["kiralik"]
         cikis_ani = sb["cikis_ani"]
 
-        # Tip seçimi gerçek yük bilinmeden yapılmıştı; şimdi biliyoruz.
-        # Kiralık aracın türü sözleşmeyle sabit, ona dokunulmaz.
-        if not kiralik:
-            arac_tipi = _gercek_yukte_en_ucuz_tip(
-                cikis, varis, arac_tipi, desi_gercek, kisitlar
-            )
+        # Not: araç tipi `_talepleri_ata` içinde, gerçek yük belli olur olmaz
+        # yeniden seçildi (elleçleme muhasebesi varış gününe bağlı olduğu için
+        # orada yapılmak ZORUNDA); burada yalnız sonucu kullanıyoruz.
 
         seyir_dk = math.ceil(
             kisitlar.seyir_saat(cikis, varis, arac_tipi) * 60
@@ -430,10 +492,31 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
         ))
 
     # ── Atanamamış talepleri yedek geç-tarihli araçlarla karşıla ────────────
-    # Planlama dönemi 7 gün; +14 gün → elleçleme kapasitesi o dönemde boş.
+    # SLA cezası gecikmeyle DOĞRUSAL arttığı için bu araçlar mümkün olan EN ERKEN
+    # güne konur — sabit "+14 gün" değil. Önceki sabit öteleme gerçek veride
+    # 22 satır için 3.988.605 TL ceza üretiyordu; kapasitesi boşalan ilk güne
+    # yerleştirmek bunun büyük kısmını geri kazanır. Kapasite gerçekten yoksa
+    # gün gün ileri gidilir; 14 gün sonunda hiçbir yer bulunamazsa (yapısal
+    # doygunluk) yine de plana yazılır — hiçbir yük dışarıda kalmaz (§9).
     if atanmamis:
         print(f"  uyari: {len(atanmamis)} talep normal araclara sigmadi, "
               f"gec-tarihli araclara aktariliyor.")
+
+    def _ilk_uygun_gun(cikis: str, varis: str, dogus_gun, desi: float):
+        """Her iki TM'de de `desi` kadar elleçleme kapasitesi olan ilk gün."""
+        for gecikme in range(1, 15):
+            gun = dogus_gun + timedelta(days=gecikme)
+            c_kalan = ell_kalan.get(
+                (cikis, gun), float(kisitlar.ellecleme_kapasitesi.get(cikis, 0.0))
+            )
+            v_kalan = ell_kalan.get(
+                (varis, gun), float(kisitlar.ellecleme_kapasitesi.get(varis, 0.0))
+            )
+            if c_kalan >= desi and v_kalan >= desi:
+                ell_kalan[(cikis, gun)] = c_kalan - desi
+                ell_kalan[(varis, gun)] = v_kalan - desi
+                return gun
+        return dogus_gun + timedelta(days=14)
 
     for t in atanmamis:
         cikis = t["cikis"]
@@ -441,9 +524,10 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
         desi = t["kalan"]
         arac_tipi = _spot_arac_tipi_sec(desi, kisitlar)
 
-        late_cikis = (
-            t["tarih"] + timedelta(days=14)
-        ).replace(hour=9, minute=0, second=0, microsecond=0).to_pydatetime()
+        gun = _ilk_uygun_gun(cikis, varis, pd.Timestamp(t["tarih"]).date(), desi)
+        late_cikis = datetime.combine(
+            gun, datetime.min.time().replace(hour=9)
+        )
 
         seyir_dk = math.ceil(
             kisitlar.seyir_saat(cikis, varis, arac_tipi) * 60

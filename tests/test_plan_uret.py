@@ -135,7 +135,7 @@ def test_talepleri_ata_arac_sirasi_talep_sirasiyla_ortusmese_de_dogus_korunur():
     ])
     servis_bilgileri = [_arac("2026-07-03 09:30"), _arac("2026-06-29 09:30")]
 
-    atamalar, _ = _talepleri_ata(servis_bilgileri, tahmin, kisitlar)
+    atamalar, _, _ = _talepleri_ata(servis_bilgileri, tahmin, kisitlar)
 
     for sb, talepler in atamalar:
         for t in talepler:
@@ -159,7 +159,7 @@ def test_talepleri_ata_bir_arac_birden_fazla_talep_tasir():
     tahmin = _cok_gunluk_tahmin(gun_sayisi=1, desi=1000.0)   # 09:00 + 17:00
     servis_bilgileri = [_arac("2026-06-29 17:30")]
 
-    atamalar, atanmamis = _talepleri_ata(servis_bilgileri, tahmin, kisitlar)
+    atamalar, atanmamis, _ = _talepleri_ata(servis_bilgileri, tahmin, kisitlar)
 
     assert atanmamis == []
     (_, talepler), = atamalar
@@ -178,7 +178,7 @@ def test_talepleri_ata_dogmamis_yuku_arac_almaz():
     }])
     servis_bilgileri = [_arac("2026-06-29 09:30")]
 
-    atamalar, atanmamis = _talepleri_ata(servis_bilgileri, tahmin, kisitlar)
+    atamalar, atanmamis, _ = _talepleri_ata(servis_bilgileri, tahmin, kisitlar)
 
     (_, talepler), = atamalar
     assert talepler == [], "17:00 yükü 09:30'da kalkan araca binmemeli"
@@ -208,3 +208,52 @@ def test_ellecleme_tavani_float_gurultusunu_yutar():
         # gerçek kesir hâlâ yukarı yuvarlanmalı — tolerans onu yutmamalı
         assert hesap(12_000.5) == 121
         assert hesap(0.0) == 0
+
+
+def test_talepleri_ata_ellecleme_kapasitesini_asmaz():
+    """Regresyon: kapasite muhasebesi ÜÇ ayrı yerde, gerçek yük bilinmeden
+    tahminle yapılıyordu (kiralik_placer rezervasyonu, tir_slot_tahsis,
+    spot_placer); gerçek yük ise `_talepleri_ata`da belirleniyor. Aradaki fark
+    gerçek veride kapasite kapısını 7 TM-günde patlatıyordu.
+
+    Burada A'nın günlük elleçleme kapasitesi 2.000; araç 10.000 taşıyabilir ve
+    talep 10.000. Yüklenen desi kapasiteyle sınırlı kalmalı, gerisi atanmamış
+    olarak bir sonraki güne devretmeli."""
+    kisitlar = SimpleKisitlar(
+        {("A", "B"): 100},
+        ellecleme_kapasitesi={"A": 2000.0, "B": 1_000_000.0},
+    )
+    tahmin = pd.DataFrame([{
+        "talep_id": "D70040", "tarih": pd.Timestamp("2026-06-29"),
+        "cikis": "A", "varis": "B", "slot": "09:00", "tahmin_desi": 10_000.0,
+    }])
+    servis_bilgileri = [_arac("2026-06-29 09:30")]
+
+    atamalar, atanmamis, _ = _talepleri_ata(servis_bilgileri, tahmin, kisitlar)
+
+    (_, talepler), = atamalar
+    assert sum(t.desi for t in talepler) == pytest.approx(2000.0), (
+        "araç A'nın günlük elleçleme kapasitesinden fazlasını yüklemiş"
+    )
+    assert atanmamis[0]["kalan"] == pytest.approx(8000.0)
+
+
+def test_plan_uret_yedek_arac_en_erken_uygun_gune_gider(tmp_path):
+    """Regresyon: atanamayan talep sabit +14 gün ötelenip yazılıyordu; SLA cezası
+    gecikmeyle doğrusal arttığı için bu gerçek veride 22 satır için 3.988.605 TL
+    üretiyordu. Kapasite ertesi gün boşalıyorsa araç ORAYA gitmeli."""
+    kisitlar = SimpleKisitlar(
+        {("A", "B"): 100},
+        ellecleme_kapasitesi={"A": 3000.0, "B": 1_000_000.0},
+    )
+    # 5.000 desi, günlük kapasite 3.000 -> 2.000'i ertesi güne kalmalı
+    tahmin = pd.DataFrame([{
+        "talep_id": "D70050", "tarih": pd.Timestamp("2026-06-29"),
+        "cikis": "A", "varis": "B", "slot": "09:00", "tahmin_desi": 5000.0,
+    }])
+
+    plan_df = plan_oku(plan_uret(kisitlar, tahmin, cikti_dizini=str(tmp_path)))
+
+    kalkislar = pd.to_datetime(plan_df["Çıkış Tarihi"], format="%d.%m.%Y")
+    en_gec = (kalkislar.max() - pd.Timestamp("2026-06-29")).days
+    assert en_gec <= 2, f"yedek araç {en_gec} gün ötelenmiş (+14 davranışı geri gelmiş)"

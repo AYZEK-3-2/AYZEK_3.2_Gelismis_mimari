@@ -122,6 +122,21 @@ def tir_slot_tahsis(
             gun_slot[anahtar] = kapasite.tir_kalan.get(tm, 0)
         return gun_slot[anahtar]
 
+    # Elleçleme bütçesi (TM, gün). Bu katman tır atarken TM-gün elleçleme
+    # kapasitesini TÜKETİYOR ama önceden bunu hiç hesaba katmıyordu: ne kendi
+    # tahsisini sınırlıyor ne de `kapasite`den düşüyordu, dolayısıyla `spot_placer`
+    # zaten tırların yediği kapasiteyi boşmuş gibi görüyordu. Hata uzun süre
+    # görünmedi çünkü `kiralik_placer` tam araç kapasitesi rezerve ederek açığı
+    # tesadüfen kapatıyordu; o rezervasyon gerçek yüke indirilince kapasite kapısı
+    # 7 TM-günde aşım yakaladı (İstanbul 30.06: 410.600 / 394.786 desi).
+    gun_ell: dict[tuple, float] = {}
+
+    def _ell_kalan(tm: str, gun) -> float:
+        anahtar = (tm, gun)
+        if anahtar not in gun_ell:
+            gun_ell[anahtar] = max(0.0, float(kapasite.ellecleme_kalan.get(tm, 0.0)))
+        return gun_ell[anahtar]
+
     for aday in adaylar:
         cikis, varis = aday["cikis"], aday["varis"]
         tarih = aday["tarih"]
@@ -136,7 +151,16 @@ def tir_slot_tahsis(
         if kalan_desi <= 0:
             continue
 
-        tir_sayisi = min(math.ceil(kalan_desi / tir_kap), slot_c, slot_v)
+        # Taşınabilecek desi: slot bütçesi VE iki uçtaki elleçleme bütçesi kadar
+        slot_limitli = min(slot_c, slot_v) * tir_kap
+        tasinan = min(
+            kalan_desi, slot_limitli,
+            _ell_kalan(cikis, tarih), _ell_kalan(varis, tarih),
+        )
+        if tasinan <= 0:
+            continue
+
+        tir_sayisi = min(math.ceil(tasinan / tir_kap), slot_c, slot_v)
 
         baz_saat = int(slot.split(":")[0])
         cikis_ani = datetime.combine(tarih, datetime.min.time().replace(hour=baz_saat))
@@ -150,8 +174,10 @@ def tir_slot_tahsis(
             ))
         gun_slot[(cikis, tarih)] -= tir_sayisi
         gun_slot[(varis, tarih)] -= tir_sayisi
+        gun_ell[(cikis, tarih)] -= tasinan
+        gun_ell[(varis, tarih)] -= tasinan
 
-        df.at[aday["idx"], "kalan_desi"] = max(0.0, kalan_desi - tir_sayisi * tir_kap)
+        df.at[aday["idx"], "kalan_desi"] = max(0.0, kalan_desi - tasinan)
 
         rapor_satirlar.append({
             "tarih": tarih,
@@ -162,6 +188,27 @@ def tir_slot_tahsis(
             "slot_sonrasi_cikis": gun_slot[(cikis, tarih)],
             "slot_sonrasi_varis": gun_slot[(varis, tarih)],
         })
+
+    # NOT: tırların yediği elleçleme `kapasite`den KALICI olarak düşülmez.
+    # `KapasiteDefteri.ellecleme_kalan` TM başına TEK bir GÜNLÜK sayıdır; buradaki
+    # kullanım ise (TM, gün) bazlıdır. Günlerin maksimumunu düşmek o TM'nin
+    # BÜTÜN günlerini kalıcı olarak kısar ve `spot_placer`ı aç bırakır — canlı
+    # testte tam olarak bu oldu: tek bir tır 3.000 desi taşıyınca A'nın günlük
+    # bütçesi her gün için sıfırlandı ve kalan yük 14 gün ötelendi. (Aynı hata
+    # kiralık rezervasyonunda da vardı, bkz. kiralik_placer.)
+    #
+    # Mimari kararı: erken katmanlar (kiralık/tır/spot) FİLOYU BOYUTLANDIRIR,
+    # kapasiteyi gerçek yükle uygulayan tek yer `_talepleri_ata`dır (§ katman2
+    # __init__). Buradaki `gun_ell` yalnız bu katmanın KENDİ tahsisini makul
+    # tutar; fazla üretilen araç zaten yüksüz kalır ve plana yazılmaz.
+    #
+    # Yine de tırların (TM, gün) bazındaki kullanımı `spot_placer`a AKTARILIR —
+    # gün bazlı olduğu için hiçbir günü haksız yere kısmaz, ama spot'un filoyu
+    # gerçekçi boyutlandırmasını sağlar.
+    kapasite.tir_ellecleme_kullanim = {
+        anahtar: max(0.0, float(kapasite.ellecleme_kalan.get(anahtar[0], 0.0))) - kalan
+        for anahtar, kalan in gun_ell.items()
+    }
 
     # --- 4. AŞAMA: çıktıları hazırla ---
     kalan_df = df[df["kalan_desi"] > 0].copy().reset_index(drop=True)
