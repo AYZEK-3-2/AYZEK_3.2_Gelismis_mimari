@@ -394,7 +394,14 @@ def _commit_ayir(
         ilk_arac_idx = parca.adimlar[0][0]
         gun = servisler[ilk_arac_idx].cikis_ani.date()
         if son_gun_dahil is not None:
-            return ilk_gun <= gun <= son_gun_dahil
+            # SON pencere: ÜST SINIR YOK. `spot_placer` elleçleme kapasitesi
+            # taşınca bir servisi ufkun (05.07) ötesine erteleyebiliyor (§15,
+            # en fazla 14 gün); üst sınır uygulanırsa o servisler hiçbir
+            # pencerede commit edilemez ve taşıdıkları yük SESSİZCE DÜŞER.
+            # Gerçek veride canlı olarak yakalandı: 16.211 desi / 92 talep.
+            # Geç kalkan araç plana yazılır ve SLA cezasını öder — `plan_uret`in
+            # geç-tarihli yedek araç davranışıyla aynı ilke; yük kaybolmaz.
+            return ilk_gun <= gun
         return gun == ilk_gun
 
     for parca in parcalar:

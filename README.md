@@ -53,11 +53,11 @@ Kalite kapıları geçilmeden hiçbir dosya yazılmaz; hata durumunda sıfır ol
 Süre logu her koşuda stdout'a yazılır (tipik):
 
 ```
-veri yukleme :    0.8 sn
-tahmin       :   19.8 sn
-planlama     :    6.8 sn
-dogrulama    :   97.5 sn
-TOPLAM       :  124.8 sn
+veri yukleme :    0.7 sn
+tahmin       :    5.8 sn
+planlama     :    2.3 sn
+dogrulama    :   16.4 sn
+TOPLAM       :   25.2 sn
 ```
 
 Ek seçenekler:
@@ -65,11 +65,28 @@ Ek seçenekler:
 ```bash
 python main.py --output-dir sonuclar/   # farkli cikti klasoru
 python main.py --seed 123               # farkli seed (varsayilan 42)
-python main.py --full                   # MILP+LNS (henuz hazir degil, greedy calisir)
-python main.py --milp-minutes 5         # MILP sure butcesi (--full ile)
+python main.py --full --milp-minutes 5  # MILP kayan pencere (asagiya bakin)
+python main.py --full --lns-minutes 2   # + LNS yik-onar turu
 ```
 
-Deterministik: aynı seed ile iki koşu bit düzeyinde aynı dosyaları üretir.
+Deterministik: aynı seed ile iki koşu **içerik olarak** birebir aynı iki dosya
+üretir. (Bayt düzeyinde değil — `.xlsx` bir zip'tir ve içinde oluşturma zaman
+damgası taşır; dosyaları `md5` ile değil, okuyup karşılaştırarak doğrulayın.)
+
+### `--full` (MILP kayan pencere) — durum
+
+`--full` bağlıdır ve çalışır: her 3 günlük pencerede CP-SAT modeli kurulur,
+sonucu greedy taban çizgisinin **gerçek** maliyetiyle kıyaslanır ve ucuz olan
+commit edilir; MILP çözüm bulamazsa o pencere greedy'ye düşer. Bu yüzden
+`--full` hiçbir koşulda greedy'den kötü bir plan üretemez.
+
+**Ama şu an gerçek veride kazanç getirmiyor:** CP-SAT ayrılan sürede hiçbir
+pencerede fizibil çözüm bulamıyor (pencere başına ~2,3M tam sayı değişken), yani
+tüm pencereler greedy'ye düşüyor — sonuç `--fast` ile aynı plan, çok daha uzun
+sürede. Teslim için **varsayılan (greedy) mod kullanılmalıdır.**
+
+Kalan iş, aday havuzunu küçültmektir (3 günlük pencerede 9.918 aday); ayrıntılı
+ölçüm ve öneriler: [docs/INCELEME_NOTU.md](docs/INCELEME_NOTU.md).
 
 Klasör düzeni:
 

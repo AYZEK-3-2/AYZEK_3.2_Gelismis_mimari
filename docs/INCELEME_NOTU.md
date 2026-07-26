@@ -1,0 +1,290 @@
+# AYZEK 3.2 — Uçtan Uca İnceleme Notu
+
+**Kapsam:** Devir notu §11'in 1. ve 3. maddeleri — `--full` (MILP+LNS) uçtan uca
+doğrulaması ve teslim provası — ve bu sırada baştan sona yapılan kod incelemesi.
+
+**Yöntem:** Devir notu §5'teki disiplin izlendi — dosyaların tamamı okundu, her
+iddia gerçek veriye karşı ölçüldü, bulunan her hata için hatayı yakalayan bir
+test eklendi ve o testin **eski kodda gerçekten patladığı** ayrı bir `git
+worktree`de doğrulandı.
+
+---
+
+## 1. Sonuç özeti
+
+Yedi bulgu çıktı; altısı düzeltildi, biri açık bırakıldı (aşağıda §4).
+
+| # | Bulgu | Etki | Durum |
+|---|---|---|---|
+| 1 | Araç, taşıdığı yük **doğmadan** kalkıyor | 182 satır (%4,1), 671.231 desi — fiziksel olarak geçersiz plan | Düzeltildi + yeni kapı |
+| 2 | Araç başına **tek talep** kısıtı | 608 talep (1,32M desi, %17,8) sığmıyor → +14 gün → 186,5M TL SLA | Düzeltildi |
+| 3 | Çıktı sütunları jüri şablonuyla **uyuşmuyor** | Şartname gereği **değerlendirme dışı** | Düzeltildi + yeni kapı |
+| 4 | MILP model kurulumu O(düğüm × kenar × emtia) | `--full` hiç koşamıyordu (20+ dk, 1,3 GB) | Düzeltildi |
+| 5 | MILP **kanıtlanmış çözümsüz** (INFEASIBLE) | `--full` bağlansa da çalışmazdı | Düzeltildi |
+| 6 | Kayan pencere son penceresi yük düşürüyor | 16.211 desi / 92 talep sessizce kayboluyordu | Düzeltildi + güvence |
+| 7 | MILP gerçek ölçekte çözülemiyor | `--full` kazanç getirmiyor (greedy'ye düşüyor) | **Açık** |
+
+**Ölçülen toplam etki (gerçek veri, uçtan uca):**
+
+```
+                        ÖNCE            SONRA          fark
+Araç maliyeti      57.918.428 TL   50.059.253 TL     −13,6%
+SLA cezası        215.777.591 TL   34.642.366 TL     −84,0%
+TOPLAM            273.696.018 TL   84.701.619 TL     −69,1%
+
+Doğuş anı ihlali        182 satır          0
+Sığmayan talep               608           0
+Araç sayısı                4.484       3.863         −14%
+Ortalama doluluk           %36,2       %44,3      +8 puan
+Toplam süre               36,0 sn     25,2 sn
+```
+
+---
+
+## 2. Düzeltilen bulgular
+
+### 2.1 Yük doğmadan kalkan araç *(en ciddi doğruluk hatası)*
+
+`katman2_planlama._talepleri_ata` talep kuyruğunu `(tarih, slot)` sırasına,
+araçları ise **yerleştirme sırasına** göre eşleştiriyordu. `servis_bilgileri`
+zaman sıralı değildir — önce 7 günün tamamının kiralıkları, sonra tır, sonra
+spot eklenir — yani listenin ilerisinde daha erken kalkan araçlar bulunur. İki
+sıra örtüşmediği için bir araç, kendi kalkışından **günler sonra** doğacak yükü
+taşıyabiliyordu.
+
+Gerçek veride: **182 satır (%4,1), 671.231 desi (tüm talebin %9'u)**, en uç
+örnekte yük kalkıştan **5 gün 15 saat** sonra doğuyordu (V0435, 29.06 19:00'da
+kalkıp 04.07 17:00 talebini taşıyor).
+
+Bu, MVP'yi öldüren hata sınıfının aynısıdır (687 satırın 300'ü fiziksel olarak
+geçersizdi) ve **hiçbir kapı yakalamıyordu**:
+
+- `dogrula_rota_gecerliligi` yalnız durak **sırasına** bakar
+- `dogrula_zaman_cakismasi` yalnız aracın **kendi bacakları** arasındaki tutarlılığa
+- `_hesapla_sla` yalnız **geç** teslimi cezalandırır — erken kalkış cezasızdır
+
+MILP yolu bu hatayı taşımıyordu (`post_pass._hazir_ani` doğuş anını
+`max(dogus_ani, gun_baslangici)` ile zaten koruyor); hata yalnızca teslim edilen
+greedy yolundaydı.
+
+**Düzeltme:** eşleştirme hat bazında zaman sıralı yapılıyor — araçlar kalkışa,
+talepler doğuşa göre sıralanıyor, her araç yalnız kalkışına kadar doğmuş
+talepleri alıyor. Ayrıca `katman3_simulator.dogrula_dogus_ani` eklendi:
+optimizatörden bağımsız, çıktı dosyası üzerinden çalışan yeni kapı.
+
+### 2.2 Araç başına tek talep kısıtı
+
+Her araç kuyruğun başından **tek bir ısırık** alıp duruyor, kalan kapasitesi
+çöpe gidiyordu. Koddaki gerekçe şuydu:
+
+> "Araç başına TEK talep — `dogrula_zaman_cakismasi` birden fazla satırı aynı
+> araçta farklı 'bacak' sayar ve yanlış hata verir."
+
+Bu **artık doğru değildi**: `dogrula_zaman_cakismasi` sonradan bacak bazında
+tekilleştirilecek şekilde düzeltilmiş, yorum bayat kalmıştı. Kısıt gereksiz
+yere duruyordu.
+
+Ölçülen maliyeti:
+
+- **hiçbir hatta araç eksiği yok** (289 hattın hepsinde araç ≥ talep satırı)
+- 289 hattın yalnız **9'unda** kapasite açığı var
+- buna rağmen **608 talep (1,32M desi, %17,8)** sığmıyor
+- ve **54 araç tamamen boş** kalıyor
+
+Sığmayanlar +14 gün ötelenip **186,5M TL** SLA cezası üretiyordu — toplam amaç
+fonksiyonunun %68'i tek bir gereksiz kısıttan geliyordu.
+
+**Yan etki (ayrıca düzeltildi):** çoklu yükte `desi` artık birden fazla dilimin
+toplamı; ardışık toplama float64'te son bit'te sapma bırakıyor (12000.0 yerine
+12000.000000000002). Ham `ceil(desi × 0,01)` bunu gerçek kesir sanıp süreyi bir
+dakika şişiriyor ve katman2 ile katman3 toplamı farklı sırada yaptığı için
+**kuruş kapısı** araç başına ±6,60 / ±10,61 TL (tam bir dakikalık kira) sapmayla
+kırılıyordu. `config.TAVAN_TOLERANSI_DK` (1e-9 dk = 1e-7 desi) eklendi, iki
+tarafta da ayrı ayrı uygulandı.
+
+### 2.3 Çıktı sütunları şablonla uyuşmuyor *(diskalifiye riski)*
+
+Teslim provasında yakalandı. `Tasima-plani.xlsx` jüri şablonundan **üç** noktada
+ayrışıyordu:
+
+| Üretilen | Şablon |
+|---|---|
+| `Çıkış` / `Varış` | `Çıkış Transfer Merkezi` / `Varış Transfer Merkezi` |
+| `Çıkış elleçleme süresi`, `Varış elleçleme süresi` | `Varış elleçleme süresi`, `Çıkış Elleçleme süresi` |
+| `Toplam maliyet`, `SLA cezası` | `SLA cezası`, `Toplam maliyet` |
+
+Şartname: *"bu formata uymayan takımların sonuçları kesinlikle değerlendirmeye
+alınmayacaktır."* Yani bu tek başına teslimi geçersiz kılabilirdi.
+
+**Neden hiçbir test görmedi:** sütun listesi hem yazıcıya
+(`plan_yazici.SABLON_SUTUNLARI`) hem simülatöre (`simulator.PLAN_SUTUNLARI`)
+**elle, aynı yanlışla** yazılmıştı. Sistem kendi içinde tutarlı olduğu için tüm
+kapılar geçiyordu. Format kapısı da yalnız saat biçimine ve araç tiplerine
+bakıyordu.
+
+**Düzeltme:** iki liste de şablona hizalandı ve
+`format_kapisi.dogrula_sablon_sutunlari` eklendi — kontrol artık elle yazılmış
+bir listeye değil, **şablon dosyanın kendisine** karşı yapılıyor. Her iki çıktı
+dosyası için çalışıyor, liste bir daha sessizce sapamaz.
+
+> Not: `Çıkış Elleçleme süresi`teki büyük **E** (varış sütununda küçük e)
+> şablonun kendi tutarsızlığıdır. Bilerek birebir kopyalandı, düzeltilmedi.
+
+### 2.4 MILP model kurulumu O(düğüm × kenar × emtia)
+
+`--full` bugüne kadar hiç uçtan uca koşmamıştı. `main.py` yalnız
+`"henuz hazir degil"` uyarısı basıp greedy'ye düşüyor, `--milp-minutes` hiçbir
+yere gitmiyordu. Gerçek veriyle koşturulunca darboğaz CP-SAT'ta değil, çözücünün
+süre sınırının **göremediği** Python aşamasında çıktı: akış korunumu her düğüm
+için ilgili kenar listesinin tamamını iki kez tarıyordu.
+
+| Pencere | Düğüm | Kenar | Emtia | Karşılaştırma | Kurulum |
+|---|---|---|---|---|---|
+| 1 gün | 3.298 | 8.002 | 68 | ~1,8 milyar | >10 dk |
+| 3 gün | 9.831 | 23.973 | 136 | ~45 milyar | >20 dk (1,3 GB) |
+
+Düğüm → gelen/giden indeksi tek geçişte kuruluyor; aynı kısıtlar O(kenar × emtia)
+ile üretiliyor. **Ölçüm: 1 günlük pencere kurulumu >10 dk → ~11 sn.**
+
+### 2.5 MILP kanıtlanmış çözümsüz (INFEASIBLE)
+
+Kurulum düzeldikten sonra CP-SAT 1 günlük gerçek dilimi **12,5 saniyede
+INFEASIBLE olarak kanıtladı** — yani yavaş değil, çözümsüz.
+
+Kaynağı daraltıldı: elleçleme kapasitesi ×1000 **ve** tır slotu ×1000 yapılınca
+bile INFEASIBLE. Yani kısıt değil, **yapı** sorunu: akış korunumu yükün ağdan
+çıkmasına izin vermiyor — enjekte edilen her desi bir varış düğümüne ulaşmak
+*zorunda*. Pencere yalnız kendi günlerinin servislerini gördüğü için, pik günde
+(29.06) **18 TM'nin 17'si elleçleme kapasitesinin %14–52 üstündeyken** bu talep
+karşılanamaz.
+
+```
+ASIM Karaman   :  66.506 > 43.830  (x1,52)
+ASIM Şanlıurfa : 148.191 > 101.147 (x1,47)
+ASIM Kütahya   :  94.778 > 64.732  (x1,46)
+ASIM Yalova    : 666.758 > 513.171 (x1,30)
+... 17 TM
+```
+
+Bu, mimarinin kendi tespitinin ("bekletme yapısal zorunluluk, kenar durum
+değil") modele hiç yansımamış olması demek.
+
+**Düzeltme:** `devir` değişkeni — yük pencerenin sonunda bulunduğu TM'de
+kalabilir, `kalan_desi` defteri onu bir sonraki pencereye taşır. Ceza bir günlük
+gecikmenin SLA maliyetine denk (`config.MILP_DEVIR_CEZA_TL_PER_DESI = 0,4 × 24`).
+Devir yalnız her TM'nin pencere içindeki **son** düğümüne konur (her düğüme
+konsaydı 1 günlük pencerede 224 bin gereksiz değişken olurdu).
+
+### 2.6 Kayan pencerede sessiz yük kaybı
+
+Yukarıdaki `devir` mekanizması **son** pencerede yük düşürüyordu: devredecek
+pencere kalmayınca park eden yük yok oluyordu. Mevcut kayan pencere testi bunu
+yakaladı (10.000 desinin 2.000'i teslim edilmiyordu). Son pencerede devir
+yasaklandı.
+
+Ayrıca `_commit_ayir`'in son penceredeki **üst gün sınırı** kaldırıldı:
+`spot_placer` elleçleme taşınca bir servisi ufkun ötesine erteleyebiliyor ve
+üst sınır uygulandığında o servisler hiçbir pencerede commit edilemeyip
+taşıdıkları yükü düşürüyordu — gerçek veride **16.211 desi / 92 talep**.
+
+`kayan_pencere_coz` sonuna açık bir güvence eklendi: hiçbir desi commit
+edilmeden kalırsa hata fırlatılıyor. Bu güvence 16.211 desilik kaybı canlı
+koşuda yakalayan şeydir.
+
+---
+
+## 3. Teslim provası (§11.3)
+
+Otomatik kontrol listesi — hepsi geçiyor:
+
+```
+=== Talep-tahmini.xlsx ===          === Tasima-plani.xlsx ===
+[OK] sütun adı+sırası şablonla      [OK] sütun adı+sırası şablonla
+[OK] TAM 4046 satır                 [OK] Tarih GG.AA.YYYY metin
+[OK] Tarih GG.AA.YYYY metin         [OK] Saat SS:DD (saniyesiz — FARKLI)
+[OK] Saat SS:DD:ss metin            [OK] Araç Tipi ∈ {Spot, Kiralık}
+[OK] yalnız 09:00:00 / 17:00:00     [OK] Araç türü 4 tipten
+[OK] <0,5 satırlar da var           [OK] plan ID kökleri tahminde var
+[OK] negatif tahmin yok             [OK] taşınacak her talep planda
+[OK] Talep ID tekil
+
+=== Muhasebe invariantı (§8.2) ===  === Desi korunumu ===
+[OK] maliyet araç başına tek satır  [OK] plan taşınan == tahmin toplam
+[OK] her aracın maliyeti var
+[OK] SLA cezası talep başına ≤1
+```
+
+**Determinizm:** iki koşunun çıktıları **içerik olarak** birebir aynı.
+
+> README'nin "bit düzeyinde aynı" iddiası yanlıştı ve düzeltildi: `.xlsx` bir
+> zip'tir ve içinde oluşturma zaman damgası taşır, dolayısıyla md5'leri her
+> koşuda farklı çıkar. Doğrulama dosyaları okuyup karşılaştırarak yapılmalı.
+
+**Runtime:** toplam 25,2 sn (veri 0,7 · tahmin 5,8 · planlama 2,3 · doğrulama
+16,4). Devir notundaki 124,8 sn ölçümünün oldukça altında.
+
+**Testler:** 253 yeşil (~2 dk).
+
+---
+
+## 4. Açık kalan: `--full` gerçek ölçekte çözülemiyor
+
+`--full` artık **bağlı ve çalışıyor**: her 3 günlük pencerede model kuruluyor,
+sonucu greedy'nin gerçek maliyetiyle kıyaslanıyor, ucuz olan commit ediliyor,
+MILP çözemezse o pencere greedy'ye düşüyor. Bu yüzden `--full` hiçbir koşulda
+greedy'den kötü bir plan üretemez.
+
+**Ama kazanç getirmiyor:** CP-SAT ayrılan sürede hiçbir pencerede fizibil çözüm
+bulamıyor, dolayısıyla tüm pencereler greedy'ye düşüyor — sonuç `--fast` ile
+aynı plan, çok daha uzun sürede.
+
+Ölçek (3 günlük pencere): **9.918 aday servis · 136 emtia · ~2,27 milyon tam
+sayı `f` değişkeni**; kurulum ~61 sn, çözüm bulunamıyor.
+
+Denenip **işe yaramayan** daraltma: emtiayı kendi çıkış TM'lerine göre kenar
+filtreleme. Emtia başına ortalama **12,8 / 18** çıkış TM'si olduğu için kenarların
+yalnız %12'si eleniyor — kayda değer değil.
+
+**Asıl kaldıraç aday havuzudur**, emtia ya da kenar filtresi değil. Öneriler:
+
+1. **Hat-gün başına aday sayısını talebe göre boyutla.** Şu an her (hat, gün,
+   slot) için 4 araç tipi + 3-duraklı varyantlar üretiliyor (3 günde 9.918
+   aday, hat-gün başına ~11). O hat-günün gerçek desi büyüklüğüne bakıp yalnız
+   makul 1–2 araç tipini üretmek havuzu birkaç kat küçültür.
+2. **3-duraklı adayları yalnız gerektiği yerde üret.** Konsolidasyonun asıl
+   değeri tır slotu kıt olan TM'lerde; her hatta üretmek gereksiz.
+3. **Pencereyi 1 güne indir** (3.306 aday, 68 emtia, ~340 bin değişken). Tek
+   başına yetmiyor ama 1 ve 2 ile birleşince anlamlı.
+
+Bu iş bitene kadar **teslim için varsayılan (greedy) mod kullanılmalıdır.**
+
+---
+
+## 5. Bu incelemede öğrenilenler (metodolojiye ek)
+
+Devir notu §5'teki listeye eklenecek üç madde:
+
+1. **"Sistem kendi içinde tutarlı" ≠ doğru.** Çıktı sütunları hem yazıcıya hem
+   simülatöre aynı yanlışla elle yazılmıştı; iki bağımsız katman aynı hatayı
+   paylaşınca kuruş kapısı bile göremez. Dış sözleşmeler (şablon dosyası)
+   **kaynağın kendisine** karşı doğrulanmalı, kopyasına karşı değil.
+2. **Süre sınırı olan çözücülerde asıl darboğaz kurulum olabilir.** CP-SAT'ın
+   `max_time_in_seconds`'ı yalnız *çözme* aşamasını kesiyor; model kurulumu
+   Python'da ve sınırsızdır. "MILP yavaş" teşhisi 20 dakikanın CP-SAT'a hiç
+   girmediğini gizliyordu.
+3. **Bir kısıtın gerekçesi, gerekçenin kendisi düzeltildikten sonra da kodda
+   kalır.** "Araç başına tek talep" kısıtının sebebi aylar önce giderilmişti;
+   yorumu okuyup doğrulamadan güvenmek 186,5M TL'ye mal oluyordu. Yorumda
+   *"çünkü X"* yazıyorsa X'in hâlâ doğru olduğu ölçülmeli.
+
+---
+
+## 6. Ölçüm betikleri
+
+İncelemede kullanılan ölçümler tekrarlanabilir olsun diye
+`scripts/teslim_provasi.py` altında toplandı:
+
+```bash
+python main.py --output-dir cikti/
+python scripts/teslim_provasi.py cikti/    # sablon + sartname + invariant kontrolu
+```
