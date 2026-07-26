@@ -8,7 +8,6 @@ ya da geç-tarihli yedek araçla plan dosyasına yazılır.
 from __future__ import annotations
 
 import math
-from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -67,20 +66,42 @@ def _talepleri_ata(
     kisitlar,
 ) -> tuple[list[tuple[dict, list]], list[dict]]:
     """
-    Her aracı (cikis, varis) kuyruğundaki tek bir talep dilimiyle eşleştir.
+    Her aracı, kendi hattında ve kendi kalkışından ÖNCE doğmuş taleplerle,
+    `yuk_desi` kapasitesi dolana kadar yükler.
 
-    Araç başına TEK talep — dogrula_zaman_cakismasi birden fazla satırı
-    aynı araçta farklı "bacak" sayar ve yanlış hata verir. Bu kısıt gereği
-    her araç kuyruğun başındaki talep öğesinden en fazla yuk_desi kadar
-    tek bir ısırık alır; fazlası bir sonraki araca kalır.
+    İki kural taşıyor:
+
+    1. **Yük doğmadan araca binemez.** Bir talep ancak `dogus_ani <= cikis_ani`
+       ise o araca yüklenebilir. Önceden bu hiç kontrol edilmiyordu: kuyruk
+       (tarih, slot) sırasına, araçlar ise yerleştirme sırasına göre eşleşiyordu
+       ve ikisi örtüşmüyordu — gerçek veride planın %4,1'i (182 satır, 671.231
+       desi) yükü doğmadan taşıyordu, en uç örnekte 5 gün 15 saat erken. Bu
+       fiziksel olarak geçersiz satır üretmektir (MVP'yi öldüren hata sınıfı) ve
+       hiçbir kapı yakalamıyordu; `katman3_simulator.dogrula_dogus_ani` artık
+       yakalıyor.
+
+    2. **Araç başına birden fazla talep.** Önceden her araç kuyruğun başından
+       TEK bir ısırık alıp duruyor, kalan kapasitesi çöpe gidiyordu. Gerekçe
+       olarak "dogrula_zaman_cakismasi birden fazla satırı aynı araçta farklı
+       bacak sayar" yazıyordu; o sınırlama sonradan giderildi (simulator.py
+       çakışma kontrolü artık BACAK bazında tekilleştiriyor), yorum bayat
+       kalmıştı. Kısıtın maliyeti ölçüldü: gerçek veride hiçbir hatta araç
+       eksiği olmamasına rağmen 608 talep (1,32M desi, tüm talebin %17,8'i)
+       araçlara sığmıyor, 54 araç ise tamamen boş kalıyordu; sığmayanlar +14
+       gün ötelenip 186,5M TL SLA cezası üretiyordu.
+
+    Eşleştirme hat bazında, ZAMAN SIRASINA göre yapılır: araçlar kalkış anına,
+    talepler doğuş anına göre sıralanır; her araç, kalkışına kadar doğmuş
+    talepler arasından en eskisini önce alır (en eski yük en çok gecikme
+    riskindedir).
 
     Returns
     -------
-    atamalar  : [(servis_bilgisi, [TalepAtama]), ...]   ← liste uzunluğu 0 ya da 1
-    atanmamis : kuyrukta kalan (desi > 1e-9) talep dicts
+    atamalar  : [(servis_bilgisi, [TalepAtama, ...]), ...]  ← araç başına 0..n talep
+    atanmamis : hiçbir araca sığmayan (desi > 1e-9) talep dicts
     """
-    # Kuyruğu oluştur — sıfır ve negatif desiyi atla
-    kuyruklar: dict[tuple, deque] = {}
+    # Hat bazında talep listesi — sıfır ve negatif desiyi atla
+    hat_talepleri: dict[tuple, list[dict]] = {}
     sirali = tahmin_df.sort_values(
         ["tarih", "slot", "cikis", "varis"], kind="stable"
     )
@@ -89,57 +110,72 @@ def _talepleri_ata(
         if kalan < 1e-9:
             continue
         key = (str(row["cikis"]), str(row["varis"]))
-        if key not in kuyruklar:
-            kuyruklar[key] = deque()
-        kuyruklar[key].append({
+        hat_talepleri.setdefault(key, []).append({
             "talep_id": str(row["talep_id"]),
             "tarih": pd.Timestamp(row["tarih"]),
             "slot": str(row["slot"]),
             "kalan": kalan,
             "cikis": str(row["cikis"]),
             "varis": str(row["varis"]),
+            "dogus_ani": _dogus_ani(row["tarih"], str(row["slot"])),
         })
 
-    atamalar: list[tuple[dict, list]] = []
+    # Araçları hatlarına göre grupla; her hat içinde kalkış anına göre sırala.
+    # `servis_bilgileri` içindeki orijinal sıra korunmalı (çağıran atamaları
+    # sırayla eşleştiriyor), o yüzden indeksle çalışılır.
+    hat_araclari: dict[tuple, list[int]] = {}
+    for i, sb in enumerate(servis_bilgileri):
+        hat_araclari.setdefault((sb["cikis"], sb["varis"]), []).append(i)
+    for idxler in hat_araclari.values():
+        idxler.sort(key=lambda i: servis_bilgileri[i]["cikis_ani"])
 
-    for sb in servis_bilgileri:
-        key = (sb["cikis"], sb["varis"])
-        q = kuyruklar.get(key)
+    arac_talepleri: dict[int, list[TalepAtama]] = {}
 
-        # Tükenmiş (kalan<epsilon) girişleri temizle
-        if q:
-            while q and q[0]["kalan"] < 1e-9:
-                q.popleft()
-
-        if not q:
-            atamalar.append((sb, []))
+    for key, araclar in hat_araclari.items():
+        talepler = hat_talepleri.get(key)
+        if not talepler:
             continue
+        sla_gun = kisitlar.sla_gun(key[0], key[1])
 
-        # Tek ısırık: kuyruğun başından en fazla yuk_desi al
-        t = q[0]
-        alinacak = min(t["kalan"], float(sb["yuk_desi"]))
-        t["kalan"] -= alinacak
-        if t["kalan"] < 1e-9:
-            q.popleft()
+        for arac_idx in araclar:
+            sb = servis_bilgileri[arac_idx]
+            bos_kapasite = float(sb["yuk_desi"])
+            cikis_ani = sb["cikis_ani"]
 
-        sla_bitis = _dogus_ani(t["tarih"], t["slot"]) + timedelta(
-            days=kisitlar.sla_gun(t["cikis"], t["varis"])
-        )
-        talep = TalepAtama(
-            talep_id=t["talep_id"],
-            desi=alinacak,
-            son_bacak=True,
-            sla_ceza=0.0,   # plan_uret ana döngüsünde varis_ani bilindiğinde hesaplanır
-            sla_bitis=sla_bitis,
-        )
-        atamalar.append((sb, [talep]))
+            for t in talepler:
+                if bos_kapasite < 1e-9:
+                    break
+                if t["kalan"] < 1e-9:
+                    continue
+                # Kural 1: yük doğmadan binemez
+                if t["dogus_ani"] > cikis_ani:
+                    continue
 
-    # Hâlâ kuyrukta kalan talepler → atanmamis
+                alinacak = min(t["kalan"], bos_kapasite)
+                t["kalan"] -= alinacak
+                bos_kapasite -= alinacak
+
+                arac_talepleri.setdefault(arac_idx, []).append(TalepAtama(
+                    talep_id=t["talep_id"],
+                    desi=alinacak,
+                    son_bacak=True,
+                    # plan_uret ana döngüsünde varis_ani bilindiğinde hesaplanır
+                    sla_ceza=0.0,
+                    sla_bitis=t["dogus_ani"] + timedelta(days=sla_gun),
+                ))
+
+    atamalar = [
+        (sb, arac_talepleri.get(i, []))
+        for i, sb in enumerate(servis_bilgileri)
+    ]
+
     atanmamis: list[dict] = []
-    for q in kuyruklar.values():
-        for t in q:
+    for talepler in hat_talepleri.values():
+        for t in talepler:
             if t["kalan"] > 1e-9:
-                atanmamis.append(dict(t))
+                atanmamis.append({
+                    k: v for k, v in t.items() if k != "dogus_ani"
+                })
 
     return atamalar, atanmamis
 
@@ -248,7 +284,7 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
         seyir_dk = math.ceil(
             kisitlar.seyir_saat(cikis, varis, arac_tipi) * 60
         )
-        ell_v_dk = math.ceil(desi_gercek * config.ELLECLEME_DK_PER_DESI)
+        ell_v_dk = math.ceil(desi_gercek * config.ELLECLEME_DK_PER_DESI - config.TAVAN_TOLERANSI_DK)
         varis_ani = cikis_ani + timedelta(minutes=seyir_dk + ell_v_dk)
 
         # SLA cezası — varis_ani ancak burada bilindiği için (_talepleri_ata
@@ -295,7 +331,7 @@ def plan_uret(veri, tahmin, cikti_dizini: str | None = None) -> str:
         seyir_dk = math.ceil(
             kisitlar.seyir_saat(cikis, varis, arac_tipi) * 60
         )
-        ell_v_dk = math.ceil(desi * config.ELLECLEME_DK_PER_DESI)
+        ell_v_dk = math.ceil(desi * config.ELLECLEME_DK_PER_DESI - config.TAVAN_TOLERANSI_DK)
         late_varis = late_cikis + timedelta(minutes=seyir_dk + ell_v_dk)
 
         mal = _maliyet(cikis, varis, arac_tipi, False, late_cikis, desi, kisitlar)

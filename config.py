@@ -17,6 +17,17 @@ CIKTI_KLASORU = PROJE_KOKU / "cikti"
 # Elleçleme süresi: desi başına 0.01 dakika (şartname Ek Kısıt 1)
 ELLECLEME_DK_PER_DESI = 0.01
 
+# Tavan (⌈⌉) alırken yok sayılacak float gürültüsü, DAKİKA cinsinden.
+# Bir aracın yükü artık birden fazla talep diliminin toplamıdır; ardışık
+# toplama/çıkarma float64'te son bit'te sapma bırakır (12000.0 yerine
+# 12000.000000000002 gibi). Ham `ceil` bunu gerçek bir kesir sanıp süreyi
+# 1 dakika şişirir ve — katman2 ile katman3 toplamı FARKLI sırada yaptığı
+# için — kuruş kapısını araç başına ±6,60 / ±10,61 TL (tam bir dakikalık
+# kira) sapmayla kırar; gerçek veride canlı olarak ölçüldü.
+# 1e-9 dakika = 1e-7 desi: şartnamenin hassasiyetinin çok altında, yani
+# gerçek bir kesri asla yutmaz, yalnız gürültüyü siler.
+TAVAN_TOLERANSI_DK = 1e-9
+
 # SLA cezası: geciken desi x gecikme saati (üst tam saate yuvarlanır) x 0.4 TL
 SLA_CEZA_TL_PER_DESI_SAAT = 0.4
 

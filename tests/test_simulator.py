@@ -5,6 +5,7 @@ from katman3_simulator.simulator import (
     dogrula_arac_tutarliligi,
     dogrula_rota_gecerliligi,
     dogrula_zaman_cakismasi,
+    dogrula_dogus_ani,
     _tir_dokunuslarini_isle,
     SimulasyonHatasi,
 )
@@ -223,3 +224,46 @@ def test_iki_bagimsiz_direkt_sefer_ara_tmde_iki_dokunus_sayar():
 
     assert kapasite.tir_kullanim[("Yalova", "29.06.2026")] == 2
     assert sum(kapasite.tir_kullanim.values()) == 4
+
+# --- Doğuş anı kapısı (yük doğmadan araç kalkamaz) ---
+
+def _dogus_kisitlari(tarih="29.06.2026", slot="09:00"):
+    """`dogrula_dogus_ani` yalnız `kisitlar.talep`i kullanır — minimal sahte nesne."""
+    class _K:
+        talep = pd.DataFrame([{
+            "talep_id": "D00001", "cikis": "İstanbul", "varis": "Yalova",
+            "tarih": pd.Timestamp("2026-06-29"), "slot": slot,
+        }, {
+            "talep_id": "D00002", "cikis": "İstanbul", "varis": "Yalova",
+            "tarih": pd.Timestamp("2026-07-04"), "slot": "17:00",
+        }])
+    return _K()
+
+
+def test_dogus_ani_zamaninda_kalkis_gecer():
+    """Yük 09:00'da doğuyor, araç 09:20'de kalkıyor — geçerli."""
+    df = sahte_plan(**{"Çıkış Saati": ["09:20", "09:20"],
+                       "Talep ID": ["D00001", "D00001"]})
+    dogrula_dogus_ani(df, _dogus_kisitlari())
+
+
+def test_dogus_ani_erken_kalkis_reddedilir():
+    """Regresyon (gerçek veride 182 satır): araç, taşıdığı yük DOĞMADAN kalkmış.
+
+    D00002 04.07 17:00'da doğuyor ama araç 29.06 09:00'da kalkıyor —
+    fiziksel olarak imkânsız. Rota/çakışma/SLA kapılarının hiçbiri bunu
+    görmüyordu (SLA yalnız GEÇ teslimi cezalandırır).
+    """
+    df = sahte_plan(**{"Talep ID": ["D00001", "D00002"]})
+    with pytest.raises(SimulasyonHatasi, match="Yük doğmadan kalkan araç"):
+        dogrula_dogus_ani(df, _dogus_kisitlari())
+
+
+def test_dogus_ani_ara_bacak_atlanir():
+    """Konsolidasyonda ara bacağın çıkışı talebin orijinal çıkışından farklıdır;
+    yük oraya zaten önceki bacakla gelmiştir — o bacak kontrole girmemeli."""
+    df = sahte_plan(**{
+        "Çıkış": ["Eskişehir", "Eskişehir"],   # talebin çıkışı İstanbul, bu ara bacak
+        "Talep ID": ["D00002", "D00002"],
+    })
+    dogrula_dogus_ani(df, _dogus_kisitlari())

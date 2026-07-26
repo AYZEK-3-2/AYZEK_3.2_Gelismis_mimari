@@ -166,6 +166,59 @@ def dogrula_zaman_cakismasi(df: pd.DataFrame) -> None:
                 )
 
 
+def dogrula_dogus_ani(df: pd.DataFrame, kisitlar) -> None:
+    """Hiçbir araç, taşıdığı yük DOĞMADAN önce kalkmış olamaz.
+
+    Bir talep ancak kendi tamamlanma anında (09:00 / 17:00) var olur; o andan
+    önce kalkan bir araca yüklenmesi fiziksel olarak imkânsızdır. Bu kontrol
+    hiç yoktu ve hiçbir kapı yerini tutmuyordu: rota geçerliliği yalnız durak
+    SIRASINA, zaman çakışması yalnız aracın KENDİ bacakları arasındaki tutarlılığa,
+    SLA ise yalnız GEÇ teslime bakar — erken kalkış hepsinin altından geçiyordu.
+    Gerçek veride greedy planın %4,1'i (182 satır) bu ihlali taşıyordu, en uç
+    örnekte yük kalkıştan 5 gün 15 saat SONRA doğuyordu.
+
+    Bu, MVP'yi öldüren hata sınıfının (fiziksel olarak geçersiz plan satırı)
+    aynısıdır; §6 gereği optimizatörden bağımsız burada, çıktı dosyası üzerinden
+    doğrulanır.
+
+    Kontrol yalnız talebin KENDİ çıkış TM'sinden kalkan bacakta yapılır:
+    konsolidasyonlu bir yolculukta ara bacakların çıkışı talebin orijinal
+    çıkışından farklıdır ve o bacağa yük zaten önceki bacakla gelmiştir
+    (`_hesapla_sla`'nın nihai-varış filtresiyle aynı ilke).
+    """
+    talep_tablosu = kisitlar.talep
+    ihlaller = []
+
+    for _, satir in df.iterrows():
+        kok_id = str(satir["Talep ID"]).split("-")[0]
+        talep_satiri = talep_tablosu[talep_tablosu["talep_id"] == kok_id]
+        if talep_satiri.empty:
+            continue
+        talep_satiri = talep_satiri.iloc[0]
+
+        if satir["Çıkış"] != talep_satiri["cikis"]:
+            continue
+
+        saat, dakika = map(int, str(talep_satiri["slot"]).split(":"))
+        dogus = pd.Timestamp(talep_satiri["tarih"]).to_pydatetime().replace(
+            hour=saat, minute=dakika, second=0, microsecond=0
+        )
+        kalkis = _tarihe_cevir(satir["Çıkış Tarihi"], satir["Çıkış Saati"])
+
+        if kalkis < dogus:
+            ihlaller.append(
+                f"  {satir['Araç ID']} / {satir['Talep ID']}: kalkis {kalkis} "
+                f"< dogus {dogus} ({satir['Çıkış']} -> {satir['Varış']})"
+            )
+
+    if ihlaller:
+        gosterilen = "\n".join(ihlaller[:20])
+        fazla = f"\n  ... ve {len(ihlaller) - 20} satır daha" if len(ihlaller) > 20 else ""
+        raise SimulasyonHatasi(
+            f"Yük doğmadan kalkan araç ({len(ihlaller)} satır):\n{gosterilen}{fazla}"
+        )
+
+
 def _tir_dokunuslarini_isle(df: pd.DataFrame, kapasite: KapasiteDefter) -> None:
     """Tır (TM, gün) dokunuşlarını `kapasite`ye işler.
 
@@ -323,6 +376,7 @@ def simulasyonu_calistir(plan_veya_dosya, kisitlar) -> dict:
     dogrula_rota_gecerliligi(df)
     dogrula_kiralik(df, kisitlar.kiralik_hatlar)
     dogrula_zaman_cakismasi(df)
+    dogrula_dogus_ani(df, kisitlar)
 
     # Kapasite kontrolü
     kapasite = KapasiteDefter(

@@ -16,6 +16,8 @@ from datetime import datetime
 
 import pandas as pd
 
+import config
+
 SABLON_SUTUNLARI = [
     "Araç ID", "Araç Tipi", "Araç türü",
     "Çıkış", "Varış",
@@ -75,7 +77,8 @@ def plan_yaz(
 
         for bacak in arac.bacaklar:
             toplam_desi = sum(t.desi for t in bacak.talepler)
-            ell_dk = math.ceil(toplam_desi * 0.01)
+            # Tolerans: bkz. config.TAVAN_TOLERANSI_DK
+            ell_dk = math.ceil(toplam_desi * 0.01 - config.TAVAN_TOLERANSI_DK)
             bacak_ilk_satir = True
 
             for talep in bacak.talepler:
